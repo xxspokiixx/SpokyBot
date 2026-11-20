@@ -11,6 +11,7 @@ import { EMPTY, MOVE_BOT_PARTS, itemKey } from "../electron/cloud-send-parts.mjs
 import { canonicalJson } from "../shared/package-format.js";
 import { isSkillName } from "../shared/skill-md.js";
 import { retireUnusedStarter, takeArrivingDefaultBot } from "./default-bot.js";
+import { watchAsMade } from "./host/default-watch.js";
 import { IMPORTED_SKILLS_DIR, readImportedSkills, storeImportedSkills } from "./imported-skills.js";
 import { withCheckFields } from "./routine-load.js";
 import { installLibrarySkill, readLibrarySkillFile, readSkillLibraryIndex, setLibrarySkillReviewState, updateLibrarySkill } from "./skill-library.js";
@@ -156,6 +157,10 @@ export function moveItems(deps, bots, only) {
         add("library-skill", entry.name, entry.name, { text: entry.sha256.slice(0, 24) || EMPTY, state: entry.reviewState });
     return items;
 }
+/** The bot has a routine here the person set up or changed: a move counts it as in use, so the routine goes with it. */
+export function automatedBot(deps, botId) {
+    return (deps.routines()?.listRoutines() ?? []).some((routine) => routine.botId === botId && !watchAsMade(routine));
+}
 /** Each automation here and whether it is on, for the switch that turns on there what was on here; `bot`: that bot's
  * routines only. */
 export function automationSwitches(deps, bot) {
@@ -299,7 +304,7 @@ function adoptRoutine(deps, raw, runs, from, owner) {
     const routine = withCheckFields(rebased({ id: parsed.data.id, ...pick(parsed.data, ROUTINE_FIELDS) }, from, deps.dataDir));
     if (!deps.store.bot(routine.botId))
         refuse(409, "This routine's bot is not on My Cloud yet.");
-    if (routine.target === "room-goal" && (!routine.groupId || !deps.store.group(routine.groupId)))
+    if (routine.target === "room-goal" && routine.groupId && !deps.store.group(routine.groupId))
         refuse(409, "This routine's room is not on My Cloud yet.");
     const arriving = (Array.isArray(runs) ? runs : []).flatMap((run) => {
         const checked = runSchema.safeParse(run);

@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, utime
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { defaultBotThreads } from "./bot-thread-limits.ts";
 import type { JsonValue } from "./schema.ts";
 
 import { cacheUntilConfigChanges,
@@ -12,6 +13,7 @@ import { cacheUntilConfigChanges,
   ensureDirs,
   instanceConfigs,
   isValidSshAlias,
+isValidSshUserHost,
   loadBrowserProfileIdAliases,
   loadConfig,
   localVmIdleTimeoutMinutes,
@@ -38,6 +40,7 @@ import { cacheUntilConfigChanges,
   stripWorkspaceCredentialEnv,
   syncCredentialEnv,
   vpsSshAlias,
+vpsSshPort,
   browserEngineAttachCdpUrl,
   withInstanceCli,
   WORKSPACE_CREDENTIAL_ENV,
@@ -127,8 +130,11 @@ describe("configuration boundaries", () => {
     expect(() => parseConfigPatch({ tts: { fishModel: "s1" } })).toThrow("fishModel");
   });
 
-  it("defaults to three parallel threads and validates a configurable maximum of sixteen", () => {
-    expect(maxConcurrentBotThreads({})).toBe(3);
+  it("defaults to a thread count that follows the machine, and validates a configurable maximum of sixteen", () => {
+    // The default is not a constant: a 3.8 GB phone runs two, a 32 GB desktop eight (server/bot-thread-limits.ts).
+    expect(maxConcurrentBotThreads({})).toBe(defaultBotThreads());
+    expect(maxConcurrentBotThreads({})).toBeGreaterThanOrEqual(2);
+    expect(maxConcurrentBotThreads({})).toBeLessThanOrEqual(16);
     expect(parseStoredConfig({ threads: { maxConcurrentPerBot: 16 } })).toEqual({ threads: { maxConcurrentPerBot: 16 } });
     expect(maxConcurrentBotThreads(parseConfigPatch({ threads: { maxConcurrentPerBot: 1 } }))).toBe(1);
     for (const value of [0, -1, 17, 1.5, "10", null]) {
@@ -474,6 +480,28 @@ describe("configuration boundaries", () => {
     expect(vpsSshAlias({ vps: { sshAlias: "-bad" } })).toBeNull();
   });
 
+  it("keeps a user@host VPS target through the save/status round-trip", () => {
+    for (const target of ["deploy@203.0.113.7", "root@vps.example.com", "user@192.168.1.100"]) {
+      expect(parseConfigPatch({ vps: { sshAlias: target } })).toEqual({ vps: { sshAlias: target } });
+      expect(vpsSshAlias({ vps: { sshAlias: target } })).toBe(target);
+    }
+    expect(vpsSshAlias({ vps: { sshAlias: "user@host; reboot" } })).toBeNull();
+  });
+
+  it("takes a port on a user@host VPS target, and rejects one it cannot dial", () => {
+    expect(vpsSshPort("deploy@203.0.113.7")).toBeNull();
+    expect(vpsSshPort("deploy@203.0.113.7:2222")).toBe(2222);
+    expect(parseConfigPatch({ vps: { sshAlias: "deploy@203.0.113.7:2222" } })).toEqual({
+      vps: { sshAlias: "deploy@203.0.113.7:2222" },
+    });
+    expect(isValidSshUserHost("deploy@203.0.113.7:2222")).toBe(true);
+    // 0 and above the TCP range are typos: the person learns now, not when ssh refuses.
+    for (const bad of ["deploy@203.0.113.7:0", "deploy@203.0.113.7:99999", "deploy@203.0.113.7:22 ", "deploy@203.0.113.7:-1"]) {
+      expect(isValidSshUserHost(bad)).toBe(false);
+      expect(() => parseConfigPatch({ vps: { sshAlias: bad } })).toThrow("vps.sshAlias");
+    }
+  });
+
   it("validates browserEngine.attachCdpUrl as a bare CDP port or an http(s)/ws(s) URL, and forwards it only when configured", () => {
     expect(parseStoredConfig({})).toEqual({});
     expect(browserEngineAttachCdpUrl({})).toBeNull();
@@ -779,8 +807,8 @@ describe("saving the newer sections", () => {
     try {
       saveConfig({ threads: { eventLogRetentionDays: 30 } });
       const disk = JSON.parse(readFileSync(path, "utf8"));
-      expect(disk.threads).toEqual({ maxConcurrentPerBot: 3, eventLogRetentionDays: 30 });
-      expect(parseStoredConfig(disk).threads).toEqual({ maxConcurrentPerBot: 3, eventLogRetentionDays: 30 });
+      expect(disk.threads).toEqual({ maxConcurrentPerBot: defaultBotThreads(), eventLogRetentionDays: 30 });
+      expect(parseStoredConfig(disk).threads).toEqual({ maxConcurrentPerBot: defaultBotThreads(), eventLogRetentionDays: 30 });
     } finally {
       rmSync(path, { force: true });
     }

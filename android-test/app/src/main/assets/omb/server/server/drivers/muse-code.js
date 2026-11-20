@@ -6,14 +6,15 @@
 // new Muse model reaches the picker without an app release.
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
-import { MspError, spawnMspConnection } from "@muse-code/sdk";
+import { Connection, MspError } from "@muse-code/sdk";
 import { z } from "zod";
+import { instanceEnvNames } from "../bot-box/env.js";
 import { PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV } from "../config.js";
 import { newEventId, newId } from "../contracts.js";
 import { augmentedPath } from "../env-path.js";
-import { execCli } from "../procs.js";
+import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.js";
 import { redactSecretsInText } from "../redact.js";
 import { answersAlone } from "./permission-command.js";
 import { commandSummary, toolDetailPreview } from "../tool-summary.js";
@@ -27,6 +28,9 @@ const MUSE_CONTEXT_WINDOW = 1_048_576;
 const RE_ANCHOR_TURNS = 8;
 const STARTUP_TIMEOUT_MS = 30_000;
 const MODEL_LIST_TIMEOUT_MS = 20_000;
+const INTERRUPT_CONFIRM_MS = 5_000;
+const SHUTDOWN_DRAIN_MS = 10_000;
+const SHUTDOWN_KILL_GRACE_MS = 2_000;
 const MAX_TOOL_OUTPUT = 4_000;
 // Muse's catalog for a signed-in account (`model/list`), until the live list answers.
 const DEFAULT_MODELS = {
@@ -138,6 +142,25 @@ export function museQuestions(questions) {
     }));
 }
 const asRecord = (value) => value && typeof value === "object" ? value : {};
+/** Security: @muse-code/sdk 1.4.6's spawnMspConnection starts `muse serve` with its own child_process.spawn, outside
+ * the bot box and the conversation's engine home. MSP runs over the stdio of a spawnCli process instead. */
+function stdioTransport(child, exited) {
+    child.stdout.setEncoding("utf8");
+    child.stderr.resume();
+    return {
+        incoming: child.stdout,
+        write: (chunk) => new Promise((resolve, reject) => {
+            child.stdin.write(chunk, "utf8", (error) => error ? reject(error) : resolve());
+        }),
+        async close(flushed) {
+            const drained = new Promise((resolve) => setTimeout(resolve, SHUTDOWN_DRAIN_MS).unref?.());
+            await Promise.race([flushed?.catch(() => { }), drained]);
+            child.stdin.end();
+            await Promise.race([exited, drained]);
+            await killCliTree(child, SHUTDOWN_KILL_GRACE_MS);
+        },
+    };
+}
 export const MuseCodeDriver = {
     driverKind: DRIVER_KIND,
     metadata: { displayName: "Muse Code", supportsMultipleInstances: true, access: "subscription" },
@@ -175,30 +198,38 @@ export const MuseCodeDriver = {
                 env.META_API_KEY = input.environment.META_API_KEY;
             return env;
         };
-        /** The SDK spawns without a shell; Windows runs Muse's .cmd launcher through cmd.exe. */
+        /** Node's spawn runs no shell; Windows runs Muse's .cmd launcher through cmd.exe. */
         const launch = (args) => process.platform === "win32"
             ? { command: process.env.ComSpec ?? "cmd.exe", args: ["/d", "/c", config.cli, ...args] }
             : { command: config.cli, args };
-        const startHost = async (args, cwd, key, requestMcp) => {
+        const startHost = async (args, cwd, key, requestMcp, owner) => {
             const { command, args: argv } = launch(args);
-            const handshake = spawnMspConnection({ command, args: argv, cwd, env: childEnv(), shutdownTimeoutMs: 10_000 });
+            const env = childEnv();
+            const child = spawnCli(command, argv, { cwd, env, stdio: ["pipe", "pipe", "pipe"],
+                ...(owner === "bot" ? { box: { allowEnv: instanceEnvNames(input.environment, env) } } : {}) }, owner);
+            let spawnError;
+            child.once("error", (error) => { spawnError = error; });
+            const exited = new Promise((resolve) => child.once("close", () => resolve()));
+            const connection = new Connection(stdioTransport(child, exited));
             let timer;
             try {
-                const spawned = await Promise.race([
-                    handshake.initialize({ clientInfo: CLIENT_INFO, capabilities: { requestedCapabilities: requestMcp ? ["sessionMcp"] : [] } }),
+                const initialized = await Promise.race([
+                    connection.request("initialize", { clientInfo: CLIENT_INFO, capabilities: { requestedCapabilities: requestMcp ? ["sessionMcp"] : [] } }),
                     new Promise((_resolve, reject) => {
                         timer = setTimeout(() => reject(new Error("Muse Code did not start within 30 seconds.")), STARTUP_TIMEOUT_MS);
                         timer.unref?.();
                     }),
                 ]);
-                const granted = asRecord(spawned.initializeResult).grantedCapabilities;
+                connection.notify("initialized");
+                await connection.flush();
+                const granted = initialized.grantedCapabilities;
                 const host = {
-                    connection: spawned.connection, exited: spawned.exited, key, closed: false,
+                    connection, exited, key, closed: false,
                     grantedMcp: Array.isArray(granted) && granted.includes("sessionMcp"),
-                    close: () => { host.closed = true; return spawned.close(); },
+                    close: () => { host.closed = true; return connection.close(); },
                 };
                 // Approval and question requests are receipts only: notifications open the cards, answers go as commands.
-                spawned.connection.onServerRequest(async (request) => {
+                connection.onServerRequest(async (request) => {
                     if (request.method === "approval/request" || request.method === "userInput/request")
                         return {};
                     throw new Error(`Unsupported Muse request: ${request.method}`);
@@ -206,8 +237,8 @@ export const MuseCodeDriver = {
                 return host;
             }
             catch (error) {
-                await handshake.close().catch(() => { });
-                throw error;
+                await connection.close().catch(() => { });
+                throw spawnError ? new Error(describeSpawnFailure(spawnError, config.cli, cwd).message) : error;
             }
             finally {
                 if (timer)
@@ -215,10 +246,11 @@ export const MuseCodeDriver = {
             }
         };
         const refreshModels = async () => {
-            const cwd = mkdtempSync(join(tmpdir(), "omb-muse-models-"));
+            const tmpBase = process.env.TMPDIR ?? process.env.TMP ?? "/tmp";
+            const cwd = mkdtempSync(join(tmpBase, "omb-muse-models-"));
             let host;
             try {
-                host = await startHost(["serve", "--disable-shell", "--disable-write", "--no-session-log"], cwd, "models", false);
+                host = await startHost(["serve", "--disable-shell", "--disable-write", "--no-session-log"], cwd, "models", false, "openmausbot");
                 const result = await Promise.race([
                     host.connection.request("model/list", {}),
                     new Promise((_resolve, reject) => setTimeout(() => reject(new Error("Muse Code did not list its models.")), MODEL_LIST_TIMEOUT_MS).unref?.()),
@@ -263,6 +295,7 @@ export const MuseCodeDriver = {
             if (active.finished)
                 return;
             active.finished = true;
+            active.onFinished?.();
             if (state.active === active)
                 state.active = undefined;
             for (const requestId of state.pending.keys()) {
@@ -440,6 +473,13 @@ export const MuseCodeDriver = {
             state.host = undefined;
             await host?.close().catch(() => { });
         };
+        /** Muse goes on working until it confirms the interrupt; a turn it does not confirm stops only with its host. */
+        const endUnconfirmed = async (state, active) => {
+            if (active.finished || state.active !== active)
+                return;
+            await closeHost(state);
+            finishTurn(state, active, { ok: false, stopReason: "interrupted" });
+        };
         const ensureSession = async (state, turn, turnId) => {
             const cwd = turn.cwd ?? process.cwd();
             const servers = turnStdioMcpServers(turn);
@@ -460,7 +500,11 @@ export const MuseCodeDriver = {
                 return { text: turn.text, rebuilt: false, started: false };
             }
             await closeHost(state);
-            const host = await startHost(museServeArgs(turn.approvalMode), cwd, key, servers.length > 0);
+            const host = await startHost(museServeArgs(turn.approvalMode), cwd, key, servers.length > 0, "bot");
+            if (state.active?.turnId !== turnId) {
+                await host.close().catch(() => { });
+                throw new Error("Muse Code was stopped while it was starting.");
+            }
             state.host = host;
             attach(state, host);
             if (servers.length && !host.grantedMcp) {
@@ -547,7 +591,7 @@ export const MuseCodeDriver = {
                 composioMcp: true,
                 browserMcp: true,
                 dataMcp: true,
-                highlevelMcp: true,
+                highlevelMcp: true, deviceMcp: true,
                 images: true,
                 nativeImageInput: true,
                 effortLevels: EFFORT_LEVELS,
@@ -570,12 +614,16 @@ export const MuseCodeDriver = {
                 const active = state?.active;
                 if (!state || !active || active.finished)
                     return;
+                if (active.stopping)
+                    return active.stopping;
                 if (state.host && state.sessionId && active.nativeTurnId) {
-                    try {
-                        await state.host.connection.command("turn/interrupt", { sessionId: state.sessionId, turnId: active.nativeTurnId });
-                        return; // turn/completed (cancelled) settles it
-                    }
-                    catch { }
+                    const interrupt = state.host.connection.command("turn/interrupt", { sessionId: state.sessionId, turnId: active.nativeTurnId });
+                    const ended = new Promise((resolve) => { active.onFinished = resolve; });
+                    const stopping = active.stopping = Promise.race([
+                        interrupt.then(() => ended), // turn/completed (cancelled) settles it
+                        new Promise((resolve) => setTimeout(resolve, INTERRUPT_CONFIRM_MS).unref?.()),
+                    ]).catch(() => { }).then(() => endUnconfirmed(state, active));
+                    return Promise.race([interrupt.then(() => { }, () => stopping), stopping]);
                 }
                 finishTurn(state, active, { ok: false, stopReason: "interrupted" });
             },
@@ -640,7 +688,7 @@ export const MuseCodeDriver = {
             async stopAll() {
                 await Promise.all([...threads.values()].map(async (state) => {
                     if (state.active)
-                        finishTurn(state, state.active, { ok: false, stopReason: "interrupted" });
+                        await (state.active.stopping ??= endUnconfirmed(state, state.active));
                     await closeHost(state);
                 }));
             },

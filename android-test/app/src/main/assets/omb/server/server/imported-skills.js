@@ -64,7 +64,7 @@ function readChoices(botId) {
     catch { }
     return { off: [], on: {} };
 }
-function readBytes(path) {
+export function readFileNoFollow(path) {
     let fd = null;
     try {
         fd = openSync(path, constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NOFOLLOW));
@@ -148,7 +148,7 @@ function folderDigest(dir) {
             hash.update(`d ${entry.path}\n`);
             continue;
         }
-        const bytes = readBytes(entry.full);
+        const bytes = readFileNoFollow(entry.full);
         if (bytes === null)
             return null;
         hash.update(`f ${entry.executable ? "x" : "-"} ${entry.path} ${createHash("sha256").update(bytes).digest("hex")}\n`);
@@ -313,7 +313,7 @@ export function readImportedSkillFile(name) {
     const entry = readImportedSkills()[name];
     if (!entry || !importedSkillIntact(name, entry))
         return null;
-    const bytes = readBytes(join(IMPORTED_SKILLS_DIR, name, "SKILL.md"));
+    const bytes = readFileNoFollow(join(IMPORTED_SKILLS_DIR, name, "SKILL.md"));
     const text = bytes?.toString("utf8") ?? null;
     return text !== null && createHash("sha256").update(text).digest("hex") === entry.sha256 ? text : null;
 }

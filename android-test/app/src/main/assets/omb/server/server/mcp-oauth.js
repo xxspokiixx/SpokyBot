@@ -12,6 +12,8 @@ export class McpOAuthError extends Error {
         this.code = code;
     }
 }
+/** The owner of a sign-in started from a chat's Sign in card: any device that can see the card may follow it. */
+export const cardOwner = (threadId, messageId) => `card:${threadId}:${messageId}`;
 const DEFAULT_LIFETIME_MS = 5 * 60_000;
 const REFRESH_MARGIN_MS = 2 * 60_000;
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -128,10 +130,14 @@ export class McpOAuthManager {
     starting = new Map();
     refreshing = new Map();
     clients;
-    /** `clients` is read when needed: an app's secret is never copied into this store. */
+    onSettled;
+    disposed = false;
+    /** `clients` is read when needed: an app's secret is never copied into this store. `onSettled` hears each sign-in end
+     * once, except when the server shuts down. */
     constructor(options) {
         this.store = new McpOAuthStore(options.file);
         this.isOwnerLive = options.isOwnerLive ?? (() => true);
+        this.onSettled = options.onSettled ?? (() => { });
         this.lifetimeMs = options.lifetimeMs ?? DEFAULT_LIFETIME_MS;
         this.clients = options.clients ?? (() => undefined);
     }
@@ -192,6 +198,11 @@ export class McpOAuthManager {
         starting.promise = this.begin(name, url, starting, wwwAuthenticate).finally(() => this.starting.delete(name));
         this.starting.set(name, starting);
         return starting.promise;
+    }
+    /** The sign-in this owner is waiting on for a server, and whether it comes back to this computer's loopback listener. */
+    waiting(name, owner) {
+        const flow = this.flows.get(name);
+        return flow?.owner === owner && flow.status.phase === "waiting" ? { loopback: flow.server !== null } : null;
     }
     status(name, flowId, owner = "loopback") {
         const flow = this.flows.get(name);
@@ -281,6 +292,7 @@ export class McpOAuthManager {
         return refreshed;
     }
     dispose() {
+        this.disposed = true;
         for (const pending of this.starting.values())
             pending.cancelled = true;
         for (const flow of this.flows.values())
@@ -553,6 +565,15 @@ export class McpOAuthManager {
         flow.server?.close();
         flow.server?.closeIdleConnections();
         flow.status = { ...flow.status, phase, authorizationUrl: null, ...(message ? { message } : {}) };
+        if (this.disposed)
+            return;
+        // A listener's fault must neither escape the expiry timer nor turn a sign-in already stored into a failed callback.
+        try {
+            this.onSettled(flow.name, phase, flow.owner);
+        }
+        catch (error) {
+            console.error("mcp sign-in: onSettled failed", error);
+        }
     }
 }
 const isUrlServer = (server) => "url" in server;

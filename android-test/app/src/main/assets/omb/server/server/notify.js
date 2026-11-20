@@ -1,4 +1,5 @@
 import { personMentionExcerpt } from "../shared/person-mention.js";
+import { conversationLanguage, serverLine } from "./server-lines.js";
 export function summarize(text, max = 140) {
     const line = text.replace(/```[\s\S]*?```/g, " ").replace(/\s+/g, " ").trim();
     return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
@@ -6,30 +7,30 @@ export function summarize(text, max = 140) {
 export function buildSpendNotification(bot, threadId, text) {
     return { kind: "spend", botId: bot.id, botName: bot.name, threadId, title: text.title, body: summarize(text.body, 200) };
 }
+/** Something SpokyBot did on its own about `bot` that the person hears once, in one plain line. */
+export function buildNoticeNotification(bot, threadId, text) {
+    return { kind: "notice", botId: bot.id, botName: bot.name, threadId, title: bot.name, body: summarize(text, 240) };
+}
+const TITLE = {
+    approval: "server.notify.approval",
+    question: "server.notify.question",
+    "routine-failed": "server.notify.routineFailed",
+    "routine-deferred": "server.notify.routineDeferred",
+    "turn-failed": "server.notify.turnFailed",
+    incident: "server.notify.incident",
+    "delegation-settled": "server.notify.delegationSettled",
+    mention: "server.notify.mention",
+    wait: "server.notify.wait",
+};
 export function buildNotification(kind, bot, threadId, detail, extra) {
     if (bot.notifications === false)
         return null;
     const body = summarize(detail);
-    const who = extra?.group ? `${bot.name} in ${extra.group.name}` : bot.name;
-    const title = kind === "approval"
-        ? `${who} needs approval`
-        : kind === "question"
-            ? `${who} has a question`
-            : kind === "sign-in"
-                ? `${who} needs you to sign in to ${extra?.site ?? "a website"}`
-                : kind === "routine-failed"
-                    ? `${who}'s routine failed`
-                    : kind === "routine-deferred"
-                        ? `${who}'s routine is waiting`
-                        : kind === "turn-failed"
-                            ? `${who} couldn't start`
-                            : kind === "incident"
-                                ? `${who} hit a problem`
-                                : kind === "delegation-settled"
-                                    ? `${who} resumed with results`
-                                    : kind === "mention"
-                                        ? `${who} mentioned you`
-                                        : `${who} finished`;
+    const language = conversationLanguage(threadId);
+    const who = extra?.group ? serverLine(language, "server.notify.inRoom", { bot: bot.name, room: extra.group.name }) : bot.name;
+    const title = kind === "sign-in"
+        ? extra?.site ? serverLine(language, "server.notify.signIn", { who, site: extra.site }) : serverLine(language, "server.notify.signInWebsite", { who })
+        : serverLine(language, TITLE[kind] ?? "server.notify.done", { who });
     if ((kind === "done" || kind === "mention") && !body)
         return null;
     const notification = { kind, botId: bot.id, botName: bot.name, threadId, title, body };

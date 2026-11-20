@@ -1,8 +1,10 @@
 // One function per HighLevel endpoint a bot may reach, with inputs typed and outputs trimmed to what a person cares
 // about. The client itself cannot address a message, campaign, workflow or payment endpoint: that guard is here, not
 // in the tool list, so no later tool can grow a path to them.
+import { AsyncLocalStorage } from "node:async_hooks";
 import { HIGHLEVEL_NOT_CONNECTED_TEXT, HIGHLEVEL_SIGNED_OUT_TEXT } from "./instructions.js";
 import { HighLevelRelayError } from "./relay.js";
+import { sameTokens } from "./store.js";
 export const HIGHLEVEL_API_URL = "https://services.leadconnectorhq.com";
 export const HIGHLEVEL_API_ENV = "OMB_HIGHLEVEL_API_URL";
 export const HIGHLEVEL_VERSION = "2021-07-28";
@@ -12,11 +14,13 @@ export const BUDGET_CALLS = 90;
 export const BUDGET_WINDOW_MS = 10_000;
 const BACKOFF_MAX_MS = 10_000;
 const REFRESH_MARGIN_MS = 60_000;
+const MAX_SUCCESSORS = 3;
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_RESPONSE_BYTES = 4_000_000;
 const CUSTOM_FIELDS_TTL_MS = 10 * 60_000;
 const TEXT_MAX = 4_000;
-const PAGE_MAX = 50;
+export const PAGE_MAX = 50;
+export const PAGE_NUMBER_MAX = 1_000;
 /** Paths this client refuses outright, whatever tool asks: nothing here sends, campaigns, automates or charges. */
 export const FORBIDDEN_PATHS = [
     /\/conversations\/messages/u,
@@ -46,6 +50,10 @@ export class HighLevelError extends Error {
         this.signedOut = options.signedOut === true;
     }
 }
+const repeatable = (method, options) => method !== "POST" || options.repeatable === true;
+function unknownOutcome(path, cause, status) {
+    return new HighLevelError(`${cause}, and the ${thing(path)} may have been saved anyway. Check before trying again, so it is not added twice.`, { status });
+}
 const isRecord = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const str = (value) => (typeof value === "string" && value !== "" ? value.slice(0, TEXT_MAX) : undefined);
 const num = (value) => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
@@ -54,7 +62,8 @@ const list = (value) => (Array.isArray(value) ? value.filter(isRecord) : []);
 const strings = (value) => (Array.isArray(value) ? value.filter((item) => typeof item === "string").slice(0, 200) : []);
 /** Drops undefined fields so trimmed objects stay small. */
 const compact = (record) => Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined));
-const page = (value, fallback = 20) => Math.min(PAGE_MAX, Math.max(1, Math.floor(value ?? fallback)));
+const pageSize = (value) => Math.min(PAGE_MAX, Math.max(1, Math.floor(value ?? 20)));
+const pageNumber = (value) => Math.min(PAGE_NUMBER_MAX, Math.max(1, Math.floor(value ?? 1)));
 function scopeFor(path, method) {
     const read = method === "GET";
     if (path.startsWith("/contacts"))
@@ -176,6 +185,25 @@ function waitFromHeaders(headers, now) {
         return Math.min(BACKOFF_MAX_MS, interval);
     return 2_000;
 }
+/** The body as UTF-8 text, or null once it passes `max` bytes; reading stops there. */
+async function textUpTo(response, max) {
+    if (!response.body)
+        return "";
+    const reader = response.body.getReader();
+    const chunks = [];
+    let size = 0;
+    for (;;) {
+        const { done, value } = await reader.read();
+        if (done)
+            return new TextDecoder().decode(Buffer.concat(chunks));
+        size += value.byteLength;
+        if (size > max) {
+            await reader.cancel().catch(() => { });
+            return null;
+        }
+        chunks.push(value);
+    }
+}
 export function assertAllowedPath(method, path) {
     if (!path.startsWith("/") || path.includes("..") || path.includes("?") || path.includes("#"))
         throw new HighLevelError("HighLevel request path is not valid.");
@@ -197,6 +225,7 @@ export class HighLevelClient {
     fetch;
     now;
     sleep;
+    activeCall = new AsyncLocalStorage();
     budget = new Map();
     refreshing = null;
     /** `refused` holds a missing-permission answer so contact reads do not re-ask HighLevel on every call. */
@@ -209,6 +238,13 @@ export class HighLevelClient {
         this.now = options.now ?? Date.now;
         this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     }
+    withActiveCall(assertActive, run) {
+        return this.activeCall.run(assertActive, run);
+    }
+    async wait(ms) {
+        await this.sleep(ms);
+        this.activeCall.getStore()?.();
+    }
     /** The connection, refreshed ahead of expiry; throws the signed-out error when a person must reconnect. */
     async connection() {
         const current = this.store.get();
@@ -217,16 +253,34 @@ export class HighLevelClient {
         if (current.state === "needs-sign-in")
             throw new HighLevelError(HIGHLEVEL_SIGNED_OUT_TEXT, { signedOut: true });
         if (current.kind === "oauth" && current.expiresAt !== undefined && current.expiresAt - this.now() < REFRESH_MARGIN_MS)
-            return this.refresh(current);
+            return (await this.refresh(current)) ?? this.successor(current);
         return current;
     }
-    /** One refresh at a time: a burst of calls that all see an expired token shares the rotation. */
+    /** A connection the call can no longer use as it holds it: disconnected, signed out, reconnected or rotated since. */
+    replaced(connection) {
+        const current = this.store.get();
+        return !current || current.state !== "signed-in" || !sameTokens(current, connection);
+    }
+    /** What replaced `from` while a call used it: newer tokens for the same location carry the call on; another location ends it. */
+    successor(from) {
+        const current = this.store.get();
+        if (!current)
+            throw new HighLevelError(HIGHLEVEL_NOT_CONNECTED_TEXT, { signedOut: true });
+        if (current.state === "needs-sign-in")
+            throw new HighLevelError(HIGHLEVEL_SIGNED_OUT_TEXT, { signedOut: true });
+        if (current.locationId !== from.locationId)
+            throw new HighLevelError("The HighLevel connection changed to another location while this call ran; run it again.", { status: 409 });
+        return current;
+    }
+    /** One refresh per token version: a burst of calls that all see an expired token shares the rotation. Null when the
+     * connection was replaced meanwhile, so nothing was refreshed. */
     refresh(current) {
-        if (this.refreshing)
-            return this.refreshing;
-        this.refreshing = (async () => {
+        if (this.refreshing && sameTokens(this.refreshing.from, current))
+            return this.refreshing.promise;
+        this.activeCall.getStore()?.();
+        const promise = (async () => {
             if (current.kind !== "oauth" || !current.refreshToken) {
-                this.store.markNeedsSignIn("The saved token was rejected by HighLevel.");
+                this.store.markNeedsSignIn("The saved token was rejected by HighLevel.", current);
                 throw new HighLevelError(HIGHLEVEL_SIGNED_OUT_TEXT, { status: 401, signedOut: true });
             }
             if (!this.refreshViaRelay)
@@ -236,28 +290,29 @@ export class HighLevelClient {
                 tokens = await this.refreshViaRelay(current.refreshToken);
             }
             catch (error) {
+                if (this.replaced(current))
+                    return null;
                 if (error instanceof HighLevelRelayError && error.status === 401) {
-                    this.store.markNeedsSignIn("HighLevel rejected the saved sign-in (it was revoked or the app was uninstalled).");
+                    this.store.markNeedsSignIn("HighLevel rejected the saved sign-in (it was revoked or the app was uninstalled).", current);
                     throw new HighLevelError(HIGHLEVEL_SIGNED_OUT_TEXT, { status: 401, signedOut: true });
                 }
                 throw new HighLevelError("HighLevel's sign-in could not be refreshed right now (the SpokyBot relay did not answer); try again in a minute.", { status: 503 });
             }
-            const rotated = this.store.rotate({
+            return this.store.rotate({
                 accessToken: tokens.accessToken, refreshToken: tokens.refreshToken,
                 expiresAt: this.now() + tokens.expiresIn * 1000, scopes: tokens.scope,
-            });
-            if (!rotated)
-                throw new HighLevelError(HIGHLEVEL_NOT_CONNECTED_TEXT, { signedOut: true });
-            return rotated;
-        })().finally(() => { this.refreshing = null; });
-        return this.refreshing;
+            }, current);
+        })().finally(() => { if (this.refreshing?.promise === promise)
+            this.refreshing = null; });
+        this.refreshing = { from: current, promise };
+        return promise;
     }
     async spend(locationId) {
         const window = this.budget.get(locationId) ?? [];
         const now = this.now();
         const recent = window.filter((at) => now - at < BUDGET_WINDOW_MS);
         if (recent.length >= BUDGET_CALLS) {
-            await this.sleep(Math.max(1, recent[0] + BUDGET_WINDOW_MS - now));
+            await this.wait(Math.max(1, recent[0] + BUDGET_WINDOW_MS - now));
             return this.spend(locationId);
         }
         recent.push(now);
@@ -269,6 +324,7 @@ export class HighLevelClient {
             if (value !== undefined && value !== "")
                 url.searchParams.set(key, String(value));
         await this.spend(connection.locationId);
+        this.activeCall.getStore()?.();
         try {
             return await this.fetch(url, {
                 method, redirect: "error",
@@ -283,12 +339,23 @@ export class HighLevelClient {
             });
         }
         catch {
-            throw new HighLevelError("HighLevel did not answer (the request timed out or the network failed); try again in a minute.", { status: 503 });
+            throw this.noAnswer(method, path, options);
         }
     }
-    async body(response) {
-        const text = await response.text();
-        if (text.length > MAX_RESPONSE_BYTES)
+    noAnswer(method, path, options) {
+        if (!repeatable(method, options))
+            return unknownOutcome(path, "HighLevel did not answer (the request timed out or the network failed)", 503);
+        return new HighLevelError("HighLevel did not answer (the request timed out or the network failed); try again in a minute.", { status: 503 });
+    }
+    async body(response, method, path, options) {
+        let text;
+        try {
+            text = await textUpTo(response, MAX_RESPONSE_BYTES);
+        }
+        catch {
+            throw this.noAnswer(method, path, options);
+        }
+        if (text === null)
             throw new HighLevelError("HighLevel's answer was too large to read; narrow the request.", { status: response.status });
         try {
             return text ? JSON.parse(text) : {};
@@ -297,42 +364,59 @@ export class HighLevelClient {
             return {};
         }
     }
-    /** Bearer + Version; 401 → refresh once → retry; 429 → wait per headers (max 10 s) → retry once; 5xx → retry once. */
+    /** A create is never replayed after a 5xx: HighLevel may have saved it before failing. */
     async request(method, path, options = {}) {
         assertAllowedPath(method, path);
         let connection = await this.connection();
         let refreshed = false;
         let waited = false;
         let retried5xx = false;
+        let successors = 0;
+        const successor = (from) => {
+            const next = this.successor(from);
+            if (++successors > MAX_SUCCESSORS)
+                throw new HighLevelError("HighLevel's sign-in kept changing while this call ran; try again in a minute.", { status: 503 });
+            return next;
+        };
         for (;;) {
             const response = await this.dispatch(connection, method, path, options);
             if (response.ok)
-                return this.body(response);
-            const body = await this.body(response);
+                return this.body(response, method, path, options);
+            if (response.status >= 500 && !repeatable(method, options)) {
+                await response.body?.cancel().catch(() => { });
+                throw unknownOutcome(path, `HighLevel had trouble (${response.status})`, response.status);
+            }
+            if (response.status >= 500 && !retried5xx) {
+                await response.body?.cancel().catch(() => { });
+                retried5xx = true;
+                await this.wait(1_000);
+                continue;
+            }
+            const body = await this.body(response, method, path, options);
             // A live token that lacks one scope: name the permission; refreshing would not add it and the token still works.
             if (response.status === 401 && isScopeRefusal(body))
                 throw plainError(response.status, method, path, body);
+            if (response.status === 401 && this.replaced(connection)) {
+                connection = successor(connection);
+                continue;
+            }
             if (response.status === 401 && !refreshed) {
-                refreshed = true;
                 if (connection.kind === "token") {
-                    this.store.markNeedsSignIn("HighLevel rejected the Private Integration token.");
+                    this.store.markNeedsSignIn("HighLevel rejected the Private Integration token.", connection);
                     throw new HighLevelError(HIGHLEVEL_SIGNED_OUT_TEXT, { status: 401, signedOut: true });
                 }
-                connection = await this.refresh(connection);
+                const rotated = await this.refresh(connection);
+                refreshed = rotated !== null;
+                connection = rotated ?? successor(connection);
                 continue;
             }
             if (response.status === 429 && !waited) {
                 waited = true;
-                await this.sleep(waitFromHeaders(response.headers, this.now()));
-                continue;
-            }
-            if (response.status >= 500 && !retried5xx) {
-                retried5xx = true;
-                await this.sleep(1_000);
+                await this.wait(waitFromHeaders(response.headers, this.now()));
                 continue;
             }
             if (response.status === 401) {
-                this.store.markNeedsSignIn("HighLevel rejected the refreshed sign-in.");
+                this.store.markNeedsSignIn("HighLevel rejected the refreshed sign-in.", connection);
             }
             throw plainError(response.status, method, path, body);
         }
@@ -423,9 +507,9 @@ export class HighLevelClient {
             filters.push({ field: "phone", operator: "eq", value: input.phone });
         if (input.tag)
             filters.push({ field: "tags", operator: "eq", value: input.tag });
-        const current = page(input.page, 1);
-        const raw = await this.request("POST", "/contacts/search", { body: compact({
-                locationId, page: current, pageLimit: page(input.limit), query: input.query?.trim() || undefined, ...(filters.length ? { filters } : {}),
+        const current = pageNumber(input.page);
+        const raw = await this.request("POST", "/contacts/search", { repeatable: true, body: compact({
+                locationId, page: current, pageLimit: pageSize(input.limit), query: input.query?.trim() || undefined, ...(filters.length ? { filters } : {}),
             }) });
         const definitions = await this.customFieldDefinitions().catch(() => []);
         const record = isRecord(raw) ? raw : {};
@@ -448,7 +532,7 @@ export class HighLevelClient {
         return this.trimContact(contact, await this.customFieldDefinitions().catch(() => []));
     }
     async addTags(contactId, tags) {
-        const raw = await this.request("POST", `/contacts/${encodeURIComponent(contactId)}/tags`, { body: { tags } });
+        const raw = await this.request("POST", `/contacts/${encodeURIComponent(contactId)}/tags`, { repeatable: true, body: { tags } });
         return { contactId, tags: strings(isRecord(raw) ? raw.tags : []) };
     }
     async removeTags(contactId, tags) {
@@ -502,10 +586,10 @@ export class HighLevelClient {
     }
     async searchOpportunities(input) {
         const locationId = await this.locationId();
-        const current = page(input.page, 1);
+        const current = pageNumber(input.page);
         const raw = await this.request("GET", "/opportunities/search", { query: {
                 location_id: locationId, q: input.query?.trim() || undefined, pipeline_id: input.pipelineId, pipeline_stage_id: input.stageId,
-                contact_id: input.contactId, status: input.status, page: current, limit: page(input.limit),
+                contact_id: input.contactId, status: input.status, page: current, limit: pageSize(input.limit),
             } });
         const record = isRecord(raw) ? raw : {};
         const meta = isRecord(record.meta) ? record.meta : {};
@@ -534,7 +618,7 @@ export class HighLevelClient {
         const locationId = await this.locationId();
         const raw = await this.request("GET", "/conversations/search", {
             version: HIGHLEVEL_CONVERSATIONS_VERSION,
-            query: { locationId, contactId: input.contactId, query: input.query?.trim() || undefined, limit: page(input.limit) },
+            query: { locationId, contactId: input.contactId, query: input.query?.trim() || undefined, limit: pageSize(input.limit) },
         });
         const record = isRecord(raw) ? raw : {};
         return compact({
@@ -549,7 +633,7 @@ export class HighLevelClient {
     }
     async readConversation(conversationId, input = {}) {
         const raw = await this.request("GET", `/conversations/${encodeURIComponent(conversationId)}/messages`, {
-            version: HIGHLEVEL_CONVERSATIONS_VERSION, query: { limit: page(input.limit), lastMessageId: input.lastMessageId },
+            version: HIGHLEVEL_CONVERSATIONS_VERSION, query: { limit: pageSize(input.limit), lastMessageId: input.lastMessageId },
         });
         // Documented as { lastMessageId, nextPage, messages }; served as { messages: { lastMessageId, nextPage, messages } }.
         const record = isRecord(raw) ? raw : {};

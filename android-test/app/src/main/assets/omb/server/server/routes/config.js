@@ -8,7 +8,7 @@ import { boatAccountResourceChangeError, vpsAliasResourceChangeError } from "../
 import { CLOUD_PERSONAL_REFUSAL } from "../cloud-owner.js";
 import * as composio from "../composio.js";
 import { browserProfilePartitionTarget, browserProfileReplacementConflict, builtInBrowserEnabled, changedInstanceIds, engineLaunches, loadConfig, localVmMode, mergeOpenCodeProviderKeys, parseConfigPatch, saveConfig, syncCredentialEnv, vpsSshAlias, } from "../config.js";
-import { deciderIncludedHere, deciderPatchKey, deciderSavePatch, deciderSharedKeyUsable } from "../decider/index.js";
+import { DECIDER_KEY_REJECTED, deciderIncludedHere, deciderPatchKey, deciderSavePatch, deciderSharedKeyUsable } from "../decider/index.js";
 import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.js";
 import { forgetKey } from "../key-rejections.js";
 import { PROVIDER_KEY_KINDS } from "../provider-key-check.js";
@@ -17,7 +17,7 @@ import * as tts from "../tts/index.js";
 import * as vps from "../vps-computer.js";
 import { PASS } from "./table.js";
 export function createConfigRoutes(deps) {
-    const { store, cfg, registry, sessions, browserCleanup, browserLive, browserRuntime, usedBrowserSessions, decider, closeBrowser, browserEngineSwitched, sharedComputers, sharedComputerControl, hostedModels, cloudHome: CLOUD_HOME, lendingEnabled, providerConfigs, localVmIdleMs, localVmIdles, localVmActiveThreads, localVmLifecycleBusy, localVmImageBusy, localVmModeChangeBusy, providerConfigBusy, computerProviderConfigTransitions, managedBoatOwners, providerOperationConflict, perBotLocalVmCountForModeChange, checkedModelSelection, policyModelRefusal, browserSessionSpec, configStatus, configForAccess, resyncOpenCodeProviderKeys, revokeEngineCapabilities, reloadProviders, broadcast, drainQueuedSends, ownProfile, } = deps;
+    const { store, cfg, registry, sessions, browserCleanup, browserLive, browserRuntime, usedBrowserSessions, decider, closeBrowser, browserEngineSwitched, sharedComputers, sharedComputerControl, hostedModels, cloudHome: CLOUD_HOME, lendingEnabled, providerConfigs, localVmIdleMs, localVmIdles, localVmActiveThreads, localVmLifecycleBusy, localVmImageBusy, localVmModeChangeBusy, providerConfigBusy, computerProviderConfigTransitions, managedBoatOwners, providerOperationConflict, perBotLocalVmCountForModeChange, checkedModelSelection, policyModelRefusal, browserSessionSpec, configStatus, configForAccess, resyncOpenCodeProviderKeys, revokeEngineCapabilities, reloadProviders, broadcast, drainQueuedSends, ownProfile, postiz, } = deps;
     return async ({ req, res, url, path, method, auth, json, readBody }) => {
         // API keys are never echoed back: booleans only.
         if (method === "GET" && path === "/api/config") {
@@ -25,7 +25,7 @@ export function createConfigRoutes(deps) {
         }
         if ((method === "PUT" || method === "PATCH") && path === "/api/config") {
             const body = await readBody(req);
-            if (hostedModels && ["instances", "anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "meta", "opencodeGo"].some(key => Object.hasOwn(body, key)))
+            if (hostedModels && ["instances", "anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "meta", "opencodeGo"].some(key => Object.hasOwn(body, key)))
                 return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
             const patch = parseConfigPatch(body);
             if (patch.profile && ownProfile) {
@@ -280,6 +280,9 @@ export function createConfigRoutes(deps) {
                         patch.composio = { ...patch.composio, apiKey: "", sessionId: "" };
                     }
                 }
+                const postizRefusal = await postiz?.configCheck(patch);
+                if (postizRefusal)
+                    return json(res, postizRefusal.status, { error: postizRefusal.error, code: postizRefusal.code });
                 const newBoatToken = patch.box?.token;
                 if (newBoatToken?.trim()) {
                     const check = await boat.verifyToken(newBoatToken);
@@ -361,9 +364,7 @@ export function createConfigRoutes(deps) {
                 if (deciderKey) {
                     const check = await decider.testKey(deciderKey.check);
                     if (!check.ok && check.reason === "rejected") {
-                        const error = deciderKey.provider === "openrouter"
-                            ? "OpenRouter rejected this key. Check it at openrouter.ai/keys and paste it again."
-                            : "Jev rejected this key. Check it at typesafe.ai and paste it again.";
+                        const error = DECIDER_KEY_REJECTED[deciderKey.provider];
                         return json(res, 400, { error, code: "decider_rejected" });
                     }
                 }
@@ -451,6 +452,8 @@ export function createConfigRoutes(deps) {
                             persisted.decider.key = "";
                         if (persisted.decider?.openrouterKey !== undefined)
                             persisted.decider.openrouterKey = "";
+                        if (persisted.decider?.workersAiToken !== undefined)
+                            persisted.decider.workersAiToken = "";
                         if (persisted.imageGen?.key !== undefined)
                             persisted.imageGen.key = "";
                         if (persisted.imageGen?.customApiKey !== undefined)
@@ -459,6 +462,8 @@ export function createConfigRoutes(deps) {
                             persisted.live.key = "";
                         if (persisted.treg?.key !== undefined)
                             persisted.treg.key = "";
+                        if (persisted.postiz?.key !== undefined)
+                            persisted.postiz.key = "";
                         saveConfig(persisted);
                         configWriteCommitted = true;
                         syncCredentialEnv(patch);
@@ -488,6 +493,7 @@ export function createConfigRoutes(deps) {
                 for (const key of resetKeys)
                     if (key)
                         forgetKey(key);
+                postiz?.configSaved(patch);
                 // A saved key reaches an engine through the environment its status read uses, often with no reload.
                 registry.forgetSnapshots();
                 if (patch.localVm?.idleTimeoutMinutes !== undefined) {

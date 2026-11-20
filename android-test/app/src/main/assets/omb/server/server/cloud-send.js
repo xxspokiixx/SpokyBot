@@ -50,9 +50,9 @@ export function botParts(bot, picture) {
 }
 /** A bot nobody has touched since it was made (a fresh install's starter): left out, so it never lands beside My Cloud's
  * own starter. A bot sent from another computer arrives without a greeting, so it never reads as unused. */
-export function unused(bot, skills, greetingOnly, inRoom = () => false) {
+export function unused(bot, skills, greetingOnly, inRoom = () => false, automated = () => false) {
     return !bot.soul?.trim() && !bot.title && !bot.description && !bot.avatarUrl && !bot.sidebarHidden && !bot.welcomed && skills === 0 && (bot.tasks?.length ?? 1) <= 1 && greetingOnly(bot.threadId, bot.name)
-        && !inRoom(bot.id);
+        && !inRoom(bot.id) && !automated(bot.id);
 }
 /** `move`: a move's comparison, with what only a move carries. `bot`: a move of that one bot into a team: the bot, its
  * skills, its routines and the library skills it uses, never anything of the person's own. */
@@ -63,7 +63,7 @@ export function cloudSendSummary(sources, { move = false, bot: only } = {}) {
         if (only !== undefined && bot.id !== only)
             continue;
         const skills = sources.skills(bot);
-        if (only === undefined && unused(bot, skills.length, sources.greetingOnly, sources.inRoom))
+        if (only === undefined && unused(bot, skills.length, sources.greetingOnly, sources.inRoom, move ? sources.automated : undefined))
             continue;
         carried.add(bot.id);
         const parts = { ...botParts(bot, sources.picture), ...(move && sources.move ? sources.move.botParts(bot) : {}) };

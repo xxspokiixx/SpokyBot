@@ -3,6 +3,69 @@ import { Type } from "typebox";
 import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 
+// shared/agents-tool-names.ts
+var given = (args, key) => args[key] !== void 0 && args[key] !== null;
+function record(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+var AGENTS_ACTION_TOOLS = {
+  trigger_info: { members: ["list_triggers", "list_trigger_events"], member: (args) => args.action === "events" ? "list_trigger_events" : "list_triggers" },
+  trigger: { members: ["create_trigger", "manage_trigger"], member: (args) => args.action === "create" ? "create_trigger" : "manage_trigger" },
+  delete_trigger: { members: ["manage_trigger"], member: () => "manage_trigger" },
+  manage_room: { members: ["manage_room", "create_room"], member: (args) => args.action === "create" ? "create_room" : "manage_room" },
+  session_search: { members: ["session_search", "session_read"], member: (args) => given(args, "thread_id") || given(args, "message_id") ? "session_read" : "session_search" },
+  show_widget: { members: ["show_widget", "update_widget"], member: (args) => given(args, "widget_id") ? "update_widget" : "show_widget" },
+  show_html: { members: ["show_html", "update_html"], member: (args) => given(args, "app_id") ? "update_html" : "show_html" },
+  x_search: {
+    members: ["x_search", "x_user_posts", "x_post", "x_profile"],
+    member: (args) => args.action === "user_posts" ? "x_user_posts" : args.action === "post" ? "x_post" : args.action === "profile" ? "x_profile" : "x_search"
+  }
+};
+var as = (name, args) => ({ name, arguments: args });
+var required = (args, key) => ({ ...args, [key]: args[key] ?? "" });
+var AGENTS_TOOL_ALIASES = {
+  list_triggers: { tools: ["trigger_info"], resolve: (args) => as("trigger_info", { ...args, action: "list" }) },
+  list_trigger_events: { tools: ["trigger_info"], resolve: (args) => as("trigger_info", { ...args, action: "events" }) },
+  create_trigger: { tools: ["trigger"], resolve: (args) => as("trigger", { ...args, action: "create" }) },
+  manage_trigger: {
+    tools: ["trigger", "delete_trigger"],
+    resolve: ({ changes, ...args }) => {
+      const fields = record(changes) ? changes : {};
+      if (args.action === "delete") {
+        const { action: _delete, ...target } = args;
+        return as("delete_trigger", { ...fields, ...target });
+      }
+      return as("trigger", { ...fields, ...args, action: args.action === "create" ? void 0 : args.action });
+    }
+  },
+  create_room: { tools: ["manage_room"], resolve: (args) => as("manage_room", { ...args, action: "create" }) },
+  session_read: { tools: ["session_search"], resolve: (args) => as("session_search", required(required(args, "thread_id"), "message_id")) },
+  update_widget: { tools: ["show_widget"], resolve: (args) => as("show_widget", required(args, "widget_id")) },
+  update_html: { tools: ["show_html"], resolve: (args) => as("show_html", required(args, "app_id")) },
+  x_user_posts: { tools: ["x_search"], resolve: (args) => as("x_search", { ...args, action: "user_posts" }) },
+  x_post: { tools: ["x_search"], resolve: (args) => as("x_search", { ...args, action: "post" }) },
+  x_profile: { tools: ["x_search"], resolve: (args) => as("x_search", { ...args, action: "profile" }) }
+};
+var aliasOf = (name) => Object.hasOwn(AGENTS_TOOL_ALIASES, name) ? AGENTS_TOOL_ALIASES[name] : void 0;
+var actionToolOf = (name) => Object.hasOwn(AGENTS_ACTION_TOOLS, name) ? AGENTS_ACTION_TOOLS[name] : void 0;
+function agentsCallMember(tool, args) {
+  return actionToolOf(tool)?.member(record(args) ? args : {}) ?? tool;
+}
+function named(tool, member) {
+  return actionToolOf(tool)?.members.includes(tool) ? [member] : [tool, member];
+}
+function agentsCallIdentities(name, args) {
+  const alias = aliasOf(name);
+  if (alias) {
+    if (args === void 0) return alias.tools.map((tool2) => named(tool2, name));
+    const call = alias.resolve(record(args) ? args : {});
+    return [named(call.name, agentsCallMember(call.name, call.arguments))];
+  }
+  const tool = actionToolOf(name);
+  if (!tool) return [[name]];
+  return args === void 0 ? tool.members.map((member) => named(name, member)) : [named(name, tool.member(record(args) ? args : {}))];
+}
+
 // shared/tool-scope.ts
 var SERVER_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
 var CONTROL_CHARACTER = /[\x00-\x1f\x7f]/;
@@ -44,17 +107,21 @@ function parseToolScope(value) {
   }
   return { ok: true, scope };
 }
-function matches(selector, tool) {
+function matches(selector, tool, names = [tool.name]) {
   const selected = selectorIdentity(selector);
-  return selected?.kind === tool.kind && (selected.kind !== "mcp" || tool.kind === "mcp" && selected.server === tool.server) && (selected.name === "*" || selected.name === tool.name);
+  return selected?.kind === tool.kind && (selected.kind !== "mcp" || tool.kind === "mcp" && selected.server === tool.server) && (selected.name === "*" || names.includes(selected.name));
 }
-function permits(scope, tool) {
+function permitsNamed(scope, tool, names) {
+  return (scope?.allow === void 0 || scope.allow.some((selector) => matches(selector, tool, names))) && !scope?.deny?.some((selector) => matches(selector, tool, names));
+}
+function permits(scope, tool, args) {
   if (!validName(tool.name) || tool.kind === "mcp" && !SERVER_NAME.test(tool.server)) return false;
-  return (scope?.allow === void 0 || scope.allow.some((selector) => matches(selector, tool))) && !scope?.deny?.some((selector) => matches(selector, tool));
+  const named2 = tool.kind === "mcp" && tool.server === "agents" ? agentsCallIdentities(tool.name, args) : [[tool.name]];
+  return named2.some((names) => permitsNamed(scope, tool, names));
 }
-function allowsTool(scope, tool) {
+function allowsTool(scope, tool, args) {
   const parsed = parseToolScope(scope);
-  return parsed.ok && permits(parsed.scope, tool);
+  return parsed.ok && permits(parsed.scope, tool, args);
 }
 function canUseMcpServer(scope, server, names) {
   const parsed = parseToolScope(scope);
@@ -183,9 +250,12 @@ var ANNOTATIONS_AND_WORDS = /* @__PURE__ */ new Set([...ANNOTATIONS, "descriptio
 var MAX_REMOTE_MCP_BYTES = 32 * 1024 * 1024;
 var REMOTE_MCP_STARTUP_MS = 3e4;
 
+// server/drivers/agents-tool-limit.ts
+var AGENTS_TOOL_TIMEOUT_SECONDS = 960;
+
 // server/drivers/pi-mcp-extension.ts
 var MCP_STARTUP_TIMEOUT_MS = 8e3;
-var MCP_TOOL_TIMEOUT_MS = 10 * 6e4;
+var MCP_TOOL_TIMEOUT_MS = AGENTS_TOOL_TIMEOUT_SECONDS * 1e3;
 var MCP_MAX_LIST_PAGES = 100;
 var MCP_MAX_FRAME_BYTES = 32 * 1024 * 1024;
 var TOOL_OUTPUT_MAX_BYTES = 50 * 1024;
@@ -420,7 +490,7 @@ function withNullable(schema, nullable) {
 }
 function collectObjectShape(schema) {
   const properties = {};
-  const required = /* @__PURE__ */ new Set();
+  const required2 = /* @__PURE__ */ new Set();
   const visit = (candidate, mode) => {
     if (!isSchemaObject(candidate)) return;
     for (const branch of candidate.allOf ?? []) visit(branch, mode === "choice" ? "choice" : "all");
@@ -429,18 +499,18 @@ function collectObjectShape(schema) {
       if (mode === "root" || properties[key] === void 0) properties[key] = value;
     }
     if (mode !== "choice" && Array.isArray(candidate.required)) {
-      for (const key of candidate.required) if (typeof key === "string") required.add(key);
+      for (const key of candidate.required) if (typeof key === "string") required2.add(key);
     }
   };
   visit(schema, "root");
-  return { properties, required };
+  return { properties, required: required2 };
 }
 function objectSchema(schema, root = false) {
-  const { properties, required } = collectObjectShape(schema);
+  const { properties, required: required2 } = collectObjectShape(schema);
   const converted = {};
   for (const [key, value] of Object.entries(properties)) {
     const nested = nestedTypebox(value);
-    converted[key] = required.has(key) ? nested : Type.Optional(nested);
+    converted[key] = required2.has(key) ? nested : Type.Optional(nested);
   }
   const options = schemaOptions(schema);
   if (typeof schema.additionalProperties === "boolean") {
@@ -709,7 +779,11 @@ async function pi_mcp_extension_default(pi) {
           parameters,
           async execute(_toolCallId, params, signal, _onUpdate, ctx) {
             const target = directoryTool ? directoryCallTarget(toolName, params) : toolName;
-            if (scope !== void 0 && (enforcementFailed || target !== void 0 && !allowsTool(scope, { kind: "mcp", server: serverName, name: target }))) {
+            if (scope !== void 0 && (enforcementFailed || target !== void 0 && !allowsTool(
+              scope,
+              { kind: "mcp", server: serverName, name: target },
+              (directoryTool && toolName === CALL_TOOL ? params?.arguments : params) ?? {}
+            ))) {
               throw new Error("Tool selection excludes this tool");
             }
             if (gated && target !== void 0) {

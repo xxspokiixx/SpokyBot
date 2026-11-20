@@ -131,6 +131,7 @@ export function redactBotAuthored(message) {
             ...out.secret,
             label: redactSecretsInText(out.secret.label),
             description: redactSecretsInText(out.secret.description),
+            ...(out.secret.reason !== undefined ? { reason: redactSecretsInText(out.secret.reason) } : {}),
             error: out.secret.error ? redactSecretsInText(out.secret.error) : undefined,
         };
     }

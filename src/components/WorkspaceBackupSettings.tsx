@@ -10,7 +10,7 @@ import { Card } from "./SettingsPrimitives";
 type BackupStatus = { busy: boolean; pendingRestore?: boolean; lastRestoreId?: string };
 const inputClass = "w-full rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[14px] text-ink disabled:opacity-50";
 const buttonClass = "cursor-pointer inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-accent-ink disabled:opacity-40";
-const validPassword = (value: string) => value.length >= 12 && value.length <= 1024;
+const validPassword = (value: string) => value.length >= 1 && value.length <= 1024;
 
 const RESTORE_CATEGORIES = [
   { id: "bots", labelKey: "backup.restore.bots", summaryKey: "bots" },
@@ -85,6 +85,7 @@ export function WorkspaceBackupSettings() {
   const [preview, setPreview] = useState<{ id: string; summary: WorkspaceBackupSummary } | null>(null);
   const [download, setDownload] = useState<{ url: string; filename: string } | null>(null);
   const [selectedCategories, setSelectedCategories] = useState<Set<RestoreCategoryId>>(new Set(RESTORE_CATEGORIES.map(c => c.id)));
+  const [exportCategories, setExportCategories] = useState<Set<RestoreCategoryId>>(new Set(RESTORE_CATEGORIES.map(c => c.id)));
 
   const refresh = async () => {
     try {
@@ -111,9 +112,9 @@ export function WorkspaceBackupSettings() {
   };
 
   const exportBackup = () => perform("export", async () => {
-    if (!validPassword(exportPassword) || exportPassword !== confirmPassword) return;
+    if (!validPassword(exportPassword) || exportPassword !== confirmPassword || exportCategories.size === 0) return;
     const result: { id: string; filename: string } = await api("/api/workspace-backup/export", {
-      method: "POST", body: JSON.stringify({ password: exportPassword, clientState: collectWorkspaceClientState() }),
+      method: "POST", body: JSON.stringify({ password: exportPassword, clientState: collectWorkspaceClientState(), categories: [...exportCategories] }),
     });
     if (alive.current) { setExportPassword(""); setConfirmPassword(""); }
     if (!alive.current) return;
@@ -183,9 +184,31 @@ export function WorkspaceBackupSettings() {
             {(!status || status.busy) && <div role="status" className="flex items-center gap-3 px-4 text-[13px] text-ink-secondary"><span>{status?.busy ? t("backup.serverBusy") : t("backup.checkStatus")}</span><button type="button" onClick={() => void refresh()} className="cursor-pointer underline">{t("connectors.action.retry")}</button></div>}
             <Card title={t("backup.export")} subtitle={t("backup.passwordHint")}>
                 <form className="flex flex-col gap-3" onSubmit={(event) => { event.preventDefault(); void exportBackup(); }}>
-                <label className="text-[13px] text-ink">{t("backup.exportPassword")}<input type="password" autoComplete="new-password" minLength={12} maxLength={1024} required disabled={disabled} value={exportPassword} onChange={(event) => setExportPassword(event.target.value)} className={`${inputClass} mt-1`} /></label>
-                <label className="text-[13px] text-ink">{t("backup.confirmPassword")}<input type="password" autoComplete="new-password" minLength={12} maxLength={1024} required disabled={disabled} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className={`${inputClass} mt-1`} /></label>
-                <button type="submit" disabled={disabled || !validPassword(exportPassword) || exportPassword !== confirmPassword} className={buttonClass}>{busy === "export" ? <Loader2 aria-hidden="true" size={15} className="animate-spin" /> : <Download aria-hidden="true" size={15} />}{busy === "export" ? t("backup.exporting") : t("backup.export")}</button>
+                <label className="text-[13px] text-ink">{t("backup.exportPassword")}<input type="password" autoComplete="new-password" maxLength={1024} required disabled={disabled} value={exportPassword} onChange={(event) => setExportPassword(event.target.value)} className={`${inputClass} mt-1`} /></label>
+                <label className="text-[13px] text-ink">{t("backup.confirmPassword")}<input type="password" autoComplete="new-password" maxLength={1024} required disabled={disabled} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className={`${inputClass} mt-1`} /></label>
+                <div className="space-y-2">
+                  <p className="text-[13px] font-medium text-ink">{t("backup.selectCategories")}</p>
+                  {RESTORE_CATEGORIES.map((cat) => {
+                    const isSelected = exportCategories.has(cat.id);
+                    return (
+                      <label key={cat.id} className="flex items-center gap-3 cursor-pointer text-[13px] text-ink">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => setExportCategories(prev => {
+                            const next = new Set(prev);
+                            if (isSelected) next.delete(cat.id); else next.add(cat.id);
+                            return next;
+                          })}
+                          disabled={disabled}
+                          className="size-4 rounded border-hairline/50 bg-inset text-accent focus:ring-2 focus:ring-focus/60"
+                        />
+                        <span>{t(cat.labelKey)}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <button type="submit" disabled={disabled || !validPassword(exportPassword) || exportPassword !== confirmPassword || exportCategories.size === 0} className={buttonClass}>{busy === "export" ? <Loader2 aria-hidden="true" size={15} className="animate-spin" /> : <Download aria-hidden="true" size={15} />}{busy === "export" ? t("backup.exporting") : t("backup.export")}</button>
                 {download && <a href={download.url} download={download.filename} className="break-all text-[13px] text-accent-text underline">{t("backup.downloadAgain", { filename: download.filename })}</a>}
                 </form>
             </Card>

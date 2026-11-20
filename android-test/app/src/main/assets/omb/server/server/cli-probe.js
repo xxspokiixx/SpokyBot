@@ -1,5 +1,6 @@
 // Settings → engines "Test": run a CLI's `--version` with only PATH, never inherited credentials.
 import { PROVIDER_CREDENTIAL_ENV, stripWorkspaceCredentialEnv } from "./config.js";
+import { clientInstall } from "./contracts.js";
 import { augmentedPath } from "./env-path.js";
 import { describeSpawnFailure, execCli } from "./procs.js";
 export async function testCliBinary(cli, driver) {
@@ -23,7 +24,7 @@ export async function testCliBinary(cli, driver) {
                         : e.killed
                             ? "CLI test timed out after 10s"
                             : `CLI exited with error ${String(e.code)}: ${(stderrOf(err) || "").slice(0, 200) || err.message.split("\n")[0]}`;
-                resolve({ ok: false, message, ...(driver?.install && isSpawnError ? { install: driver.install } : {}) });
+                resolve({ ok: false, message, ...(driver?.install && isSpawnError ? { install: clientInstall(driver.install) } : {}) });
                 return;
             }
             resolve({ ok: true, version: stdout.trim().split("\n")[0] });

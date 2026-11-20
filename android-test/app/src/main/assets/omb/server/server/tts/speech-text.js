@@ -68,8 +68,11 @@ export function speakable(input) {
     // A synthesizer renders a lone full stop as a click: nothing to say means nothing to send.
     return /[\p{L}\p{N}]/u.test(text) ? text : "";
 }
+// The first spoken block bounds time-to-first-audio, so the voice path caps it
+// tighter than the general maxChars.
+export const VOICE_FIRST_BLOCK_MAX_CHARS = 90;
 const BOUNDARY = /(?<!\b(?:e\.g|i\.e|etc|vs|Dr|Mr|Mrs|Ms|No|approx))(?<![.\d])([.!?])(["')\]]*)\s+/g;
-export function toUtterances(input, { minChars = 12, maxChars = 320 } = {}) {
+export function toUtterances(input, { minChars = 12, maxChars = 320, firstBlockMaxChars } = {}) {
     const text = speakable(input);
     if (!text)
         return [];
@@ -92,6 +95,12 @@ export function toUtterances(input, { minChars = 12, maxChars = 320 } = {}) {
                 out.push(part);
             }
         }
+    }
+    // The cap goes on the assembled first block: the minChars merge above can
+    // glue a later piece onto it, so capping the first rough piece is not enough.
+    const first = out[0];
+    if (firstBlockMaxChars !== undefined && first !== undefined && first.length > firstBlockMaxChars) {
+        out.splice(0, 1, ...splitLong(first, firstBlockMaxChars));
     }
     return out;
 }
@@ -130,6 +139,9 @@ export function narrateTool(toolName) {
         [/^(click|type_text|press_key|scroll|computer_batch)$/, "using the computer"],
         [/^open_url$/, "opening a page"],
         [/^list_bots$/, "checking who's around"],
+        [/^trigger$/, "working on an automation"],
+        [/^trigger_info$/, "checking automations"],
+        [/^delete_trigger$/, "deleting an automation"],
         [/^ask_bot$/, "asking a teammate"],
     ];
     for (const [pattern, phrase] of verbs) {

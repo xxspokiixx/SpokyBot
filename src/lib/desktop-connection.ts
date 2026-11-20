@@ -45,8 +45,11 @@ export async function connectDesktop(screen: HTMLElement, target: string, option
   });
   client.scaleViewport = true;
   client.background = "var(--color-inset)";
+  // The phone's own proxy chain (WebView -> server -> websockify -> x11vnc) can take over ten
+  // seconds to serve its first handshake, because python and x11vnc run under proot. Fifteen
+  // seconds cut that handshake off after the version banner had already arrived.
   let ended = false;
-  const deadline = setTimeout(() => { client.disconnect(); end(); }, 15_000);
+  const deadline = setTimeout(() => { client.disconnect(); end(); }, 25_000);
   function end() {
     clearTimeout(deadline);
     if (ended || cancelled.aborted) return;
@@ -71,4 +74,64 @@ export function typeOnDesktop(client: RFB, text: string): void {
     const code = char.codePointAt(0)!;
     client.sendKey(code === 10 ? 0xff0d : code === 9 ? 0xff09 : code <= 255 ? code : 0x01000000 | code, null);
   }
+}
+
+/** The X key a keyboard's deletion edit stands for. Android reports Backspace as an edit on the
+ *  focused field, not always as a key, and the field it edits is ours: the text never accumulates
+ *  there, so only the remote desktop can show the deletion. A range the person selected is one
+ *  backspace per character, because X deletes one keystroke at a time. */
+const DELETION_KEYSYMS: Record<string, number> = {
+  deleteContentBackward: 0xff08,
+  deleteWordBackward: 0xff08,
+  deleteSoftLineBackward: 0xff08,
+  deleteHardLineBackward: 0xff08,
+  deleteContentForward: 0xffff,
+  deleteWordForward: 0xffff,
+  deleteSoftLineForward: 0xffff,
+  deleteHardLineForward: 0xffff,
+};
+
+/** Sends the deletion a keyboard reported, so Backspace removes what the person sees on the desktop.
+ *  Returns false for an edit that is not a deletion, which the caller sends as text instead. */
+export function deliverDeletion(client: RFB, inputType: string, removed = 1): boolean {
+  const keysym = DELETION_KEYSYMS[inputType];
+  if (keysym === undefined) return false;
+  const repeats = Number.isFinite(removed) && removed > 0 ? Math.ceil(removed) : 1;
+  for (let index = 0; index < repeats; index++) {
+    client.sendKey(keysym, keysym === 0xff08 ? "Backspace" : "Delete", true);
+    client.sendKey(keysym, keysym === 0xff08 ? "Backspace" : "Delete", false);
+  }
+  return true;
+}
+
+/** The keys a soft keyboard produces that are not literal characters. A tablet sends these with no
+ *  physical key behind them, so they map to X keysyms rather than to `code`. Characters go through
+ *  `typeOnDesktop` instead, which is what beforeinput reports. */
+const NAMED_KEYSYMS: Record<string, number> = {
+  Enter: 0xff0d,
+  Backspace: 0xff08,
+  Tab: 0xff09,
+  Escape: 0xff1b,
+  Delete: 0xffff,
+  ArrowLeft: 0xff51,
+  ArrowUp: 0xff52,
+  ArrowRight: 0xff53,
+  ArrowDown: 0xff54,
+  Home: 0xff50,
+  End: 0xff57,
+  PageUp: 0xff55,
+  PageDown: 0xff56,
+  Insert: 0xff63,
+};
+
+/** Forwards one non-character key from the soft keyboard to the remote desktop. A chord needs a
+ *  modifier held down across both halves, which a soft keyboard cannot express, so it is left to
+ *  the person's physical keyboard and reports false. */
+export function sendSoftKey(client: RFB, event: { key: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean }): boolean {
+  if (event.ctrlKey || event.metaKey || event.altKey) return false;
+  const keysym = NAMED_KEYSYMS[event.key];
+  if (keysym === undefined) return false;
+  client.sendKey(keysym, event.key, true);
+  client.sendKey(keysym, event.key, false);
+  return true;
 }

@@ -20,14 +20,15 @@ function rig() {
   let now = 0;
   const stalls: WatchedTurn[] = [];
   const limits: number[] = [];
+  const reasons: string[] = [];
   const dog = new TurnWatchdog({
     stallMs: STALL,
     toolStallMs: TOOL_STALL,
     checkMs: 60_000,
-    onStall: (turn, silentMs) => { stalls.push(turn); limits.push(silentMs); },
+    onStall: (turn, silentMs, reason) => { stalls.push(turn); limits.push(silentMs); reasons.push(reason); },
     now: () => now,
   });
-  return { dog, stalls, limits, tick: (ms: number) => (now += ms) };
+  return { dog, stalls, limits, reasons, tick: (ms: number) => (now += ms) };
 }
 
 describe("TurnWatchdog", () => {
@@ -54,6 +55,20 @@ describe("TurnWatchdog", () => {
     }
     dog.sweep();
     expect(stalls).toHaveLength(0);
+  });
+
+  it("stops a watched turn at once when its own work threw, and says why", () => {
+    const { dog, stalls, limits, reasons, tick } = rig();
+    dog.watch("t1", "bot1");
+    tick(500);
+    expect(dog.fail("t1")).toBe(true);
+    expect(stalls).toEqual([expect.objectContaining({ threadId: "t1", botId: "bot1" })]);
+    expect(limits).toEqual([500]);
+    expect(reasons).toEqual(["server-error"]);
+    expect(dog.watching("t1")).toBe(false);
+    // A turn that already ended (a warm process or timer outlived it) is nothing to stop.
+    expect(dog.fail("t1")).toBe(false);
+    expect(stalls).toHaveLength(1);
   });
 
   it("never stalls a turn waiting on a human, however long they take", () => {

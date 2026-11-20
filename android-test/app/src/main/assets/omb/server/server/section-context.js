@@ -51,7 +51,7 @@ function loadFile(forWrite = false) {
     }
     catch {
         if (forWrite)
-            throw new Error("Saved teams and shared instructions could not be read; the existing file was left unchanged");
+            throw new Error("Saved departments and shared instructions could not be read; the existing file was left unchanged");
         return emptyFile();
     }
 }
@@ -92,7 +92,7 @@ export function changeEmptySection(name, nextName) {
     if (index < 0)
         throw new Error("No such department");
     if (nextName !== null && nextName !== name && data.sections.includes(nextName)) {
-        throw new Error("A team with that name already exists");
+        throw new Error("A department with that name already exists");
     }
     if (nextName === name)
         return;

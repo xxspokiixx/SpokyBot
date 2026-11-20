@@ -26,7 +26,7 @@ import { appendAdminAction, flushAdminActivity, sharedSignIn } from "./admin-act
 import { bindDecisionRetention, decisionRetentionDays } from "./decision-log.ts";
 import { hostedWorkspaceConfigured } from "./enterprise.ts";
 import { resolveLoopbackTrust } from "./request-auth.ts";
-import { restartPolicy } from "./restart.ts";
+import { restartLine, restartPolicy } from "./restart.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { ensureCaddy, normalizeDomainOption, startCaddy, type RunningCaddy } from "./caddy.ts";
 import { runServiceCommand } from "./service-cli.ts";
@@ -924,14 +924,17 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
   }
 }
 
-/** A server exiting with RESTART_EXIT_CODE is started again here at the same address, without a second pairing code. */
+/** A server exiting with RESTART_EXIT_CODE, or after a crash, is started again here at the same address, without a
+ * second pairing code; a crash waits longer each time, and both counts stop the launcher after their limit. */
 export async function serveUntilStopped(options: CliOptions, run: (options: CliOptions) => Promise<number> = runServe, now: () => number = Date.now): Promise<number> {
   const policy = restartPolicy(now);
   let launch = options;
   for (;;) {
     const code = await run(launch);
     if (!policy.again(code)) return code;
-    console.log("\nOpenMausBot is starting again to finish installing a copy from the desktop app…");
+    const delay = policy.delayMs();
+    console.log(restartLine(code, delay));
+    if (delay) await new Promise((done) => setTimeout(done, delay));
     launch = { ...options, pair: false, open: false };
   }
 }

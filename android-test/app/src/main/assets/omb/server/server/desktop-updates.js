@@ -3,7 +3,7 @@
 // and website sign-ins. Until then the bot's own place is unavailable: a turn never moves its work to this computer instead.
 import { containerRuntimeStatus, localVmWorkspaceExists, perBotLocalVmTarget, poolLocalVmTarget, SHARED_LOCAL_VM_TARGET, } from "./container-computer.js";
 import { discoverExistingPerBotLocalVms, discoverExistingPoolLocalVms, shouldArmLocalVmIdle } from "./local-vm-inventory.js";
-import { keepFirefoxProfileBeforeRemove } from "./local-vm-profiles.js";
+import { keepFirefoxProfileBeforeRemove, keepInstalledAppsBeforeRemove } from "./local-vm-profiles.js";
 /** A desktop SpokyBot made, or a durable folder left by one, that this release cannot run without updating. */
 export function localVmUpdateNeed(status, workspaceExists) {
     if (!status.runtime || !status.daemonUp)
@@ -40,6 +40,7 @@ export function createLocalVmUpdater(deps) {
     const pollMs = deps.pollMs ?? 1_000;
     const waitMs = deps.waitMs ?? Math.max(1_000, Number(process.env.OMB_LOCAL_VM_UPDATE_WAIT_MS) || 20 * 60_000);
     const keepSignIns = deps.keepSignIns ?? keepFirefoxProfileBeforeRemove;
+    const keepApps = deps.keepApps ?? keepInstalledAppsBeforeRemove;
     const workspaceExists = deps.workspaceExists ?? localVmWorkspaceExists;
     let image = null;
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -104,6 +105,7 @@ export function createLocalVmUpdater(deps) {
             if (status.container === "missing" || !status.managed || status.imageMatches)
                 return;
             await keepSignIns(target, status, () => deps.act("stop", target));
+            await keepApps(target, { ...status, container: "stopped" }, () => deps.act("stop", target));
             await deps.act("remove", target);
             status = await deps.act("run", target);
         }

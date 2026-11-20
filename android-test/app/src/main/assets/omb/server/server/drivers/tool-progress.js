@@ -86,6 +86,13 @@ export function codexPatchProgress(params) {
     const file = progressFile(changes[0]?.path);
     return report(activity, "edit", { bytes, ...(file ? { file } : {}), ...(typeof p?.itemId === "string" ? { itemId: p.itemId } : {}) });
 }
+/** Codex's item/commandExecution/outputDelta: the next chunk a running command printed. */
+export function codexCommandOutput(params) {
+    const p = params;
+    if (typeof p?.itemId !== "string" || !p.itemId || typeof p.delta !== "string" || !p.delta)
+        return null;
+    return { type: "item.output", itemType: "tool", itemId: p.itemId, text: p.delta };
+}
 const ACP_KINDS = {
     edit: "edit",
     delete: "edit",
@@ -119,4 +126,16 @@ export function acpToolProgress(update) {
         ...(file ? { file } : {}),
         ...(typeof u.toolCallId === "string" && u.toolCallId ? { itemId: u.toolCallId } : {}),
     });
+}
+/** An ACP call still running with text in its content: ACP replaces a call's whole content on each update. */
+export function acpToolOutput(update) {
+    const u = update;
+    if (u?.sessionUpdate !== "tool_call" && u?.sessionUpdate !== "tool_call_update")
+        return null;
+    if (u.status === "completed" || u.status === "failed" || typeof u.toolCallId !== "string" || !u.toolCallId)
+        return null;
+    const text = (Array.isArray(u.content) ? u.content : [])
+        .flatMap((part) => (part?.type === "content" && part.content?.type === "text" && typeof part.content.text === "string" ? [part.content.text] : []))
+        .join("\n");
+    return text ? { type: "item.output", itemType: "tool", itemId: u.toolCallId, text, whole: true } : null;
 }

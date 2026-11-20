@@ -20,7 +20,7 @@ export type LocalComputerConnection = {
   command: string;
   args: string[];
   env: Record<string, string>;
-  platform: "darwin" | "linux" | "win32";
+  platform: "darwin" | "linux" | "win32" | "android";
   generation?: string;
   scope: "local-computer";
 };
@@ -126,6 +126,34 @@ function decodeLegacyDescriptor(
     args,
     env: env as Record<string, string>,
     platform: supportedPlatform,
+    scope: "local-computer",
+  };
+}
+
+/** The phone writes the same embedded shape as the desktop driver, but its MCP server is a plain
+ * node script run as `<node> <script> mcp`. The descriptor keeps the Cua-style `["mcp", script]`
+ * order, so the script is moved ahead of the subcommand for node to load it. */
+function decodeAndroidDescriptor(value: LegacyConnectionDescriptor): LocalComputerConnection | null {
+  if (!value || value.mode !== "embedded" ||
+      (Object.hasOwn(value, "status") && value.status !== "ready") ||
+      typeof value.socketPath !== "string" || !value.socketPath ||
+      typeof value.mcpCommand !== "string" || !value.mcpCommand.trim()) {
+    return null;
+  }
+  if (!Array.isArray(value.mcpArgs) || value.mcpArgs[0] !== "mcp" ||
+      typeof value.mcpArgs[1] !== "string" || !value.mcpArgs[1].trim() ||
+      !value.mcpArgs.every((arg) => typeof arg === "string")) {
+    return null;
+  }
+  if (!value.mcpEnv || typeof value.mcpEnv !== "object" || Array.isArray(value.mcpEnv) ||
+      !Object.values(value.mcpEnv).every((entry) => typeof entry === "string")) {
+    return null;
+  }
+  return {
+    command: value.mcpCommand,
+    args: [value.mcpArgs[1], "mcp"],
+    env: value.mcpEnv as Record<string, string>,
+    platform: "android",
     scope: "local-computer",
   };
 }
@@ -372,6 +400,7 @@ export function decodeCuaConnection(
   } = {},
 ): LocalComputerConnection | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  if (platform === "android") return decodeAndroidDescriptor(raw as LegacyConnectionDescriptor);
   if (platform === "linux") {
     const decoded = decodeLinuxDescriptor(raw as LinuxConnectionDescriptor);
     return decoded && validateLinuxRuntime(raw as LinuxConnectionDescriptor) ? decoded : null;
@@ -406,8 +435,14 @@ export function readCuaConnection({
   try {
     const raw = JSON.parse(readFileSync(file, "utf8"));
     if (platform === "linux") return decodeCuaConnection(raw, { platform, validateLinuxRuntime: (record) => validateLinuxRuntime(file, record) });
+    if (platform === "android") return decodeCuaConnection(raw, { platform });
     return validateLegacyRuntime(file, platform) ? decodeCuaConnection(raw, { platform }) : null;
   } catch {
     return null;
   }
+}
+
+/** Reads the Android local computer connection from the app's userData directory. */
+export function androidLocalComputerConnection(userData: string): LocalComputerConnection | null {
+  return readCuaConnection({ platform: "android", userData });
 }

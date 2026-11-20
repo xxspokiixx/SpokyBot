@@ -180,7 +180,7 @@ export function VpsConnection() {
           value={alias}
           onChange={(e) => setAlias(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && save()}
-          placeholder="my-vps"
+          placeholder="user@host"
           aria-label={t("keys.vps.aria")}
           autoComplete="off"
           spellCheck={false}

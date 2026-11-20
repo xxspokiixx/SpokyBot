@@ -92,6 +92,25 @@ export class DeviceLinks {
                 return opened;
             } } : null;
     }
+    /** The newest open link of `person`'s computers that lends its Chrome, or null. */
+    chromeRoute(person) {
+        let newest = null;
+        for (const link of this.#links.values()) {
+            if (link.computer.person !== person || !link.computer.chrome || link.ws.readyState !== link.ws.OPEN || !link.computer.live())
+                continue;
+            if (!newest || link.since > newest.since)
+                newest = link;
+        }
+        const chosen = newest;
+        return chosen ? { open: async () => {
+                const opened = await chosen.mux.open({ chrome: true });
+                if ("join" in opened && Date.now() - chosen.usedAt >= USED_EVERY_MS) {
+                    chosen.usedAt = Date.now();
+                    chosen.computer.used?.();
+                }
+                return opened;
+            } } : null;
+    }
     /** Lending from that computer ended or changed: its link ends with it. */
     drop(key, code = LINK_ENDED) {
         const link = this.#links.get(key);

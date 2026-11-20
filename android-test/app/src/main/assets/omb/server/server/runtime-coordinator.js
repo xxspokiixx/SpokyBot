@@ -3,7 +3,9 @@ import { composeEnvelope, composeQuestion, composeReport, composeResume, compose
 import { Runtime } from "./runtime/runtime.js";
 import { importLegacyDelegations, importLegacyHandoffs } from "./runtime/import-legacy.js";
 import { openRuntimeStore } from "./runtime/store.js";
-import { childrenSince, clip, isTerminal, path } from "./runtime/tree.js";
+import { personOnly, requesterDecides, withDefault } from "./runtime/questions.js";
+import { answersSender, childrenSince, clip, isTerminal, path } from "./runtime/tree.js";
+import { sameRequest } from "./same-request.js";
 const NOT_RUNNING = "The originating room task is no longer running";
 const WRONG_SPEAKER = "The handoff belongs to a different room speaker";
 const ANCESTOR = "Cannot assign work back to an ancestor; results return automatically";
@@ -39,17 +41,19 @@ function runtimeOrigin(origin, source) {
         ? { kind: "person", source: "chat", ref: source.threadId, quote: origin.request }
         : { kind: "outside", source: "chat", ref: source.threadId };
 }
+/** The question a reply ends on: its last line starts with NEEDS INPUT:, or the line before a closing `Default:` line. */
 export function needsInputQuestion(text) {
     const lines = text.split(/\r?\n/);
-    let last = lines.length - 1;
-    while (last >= 0 && lines[last].trim() === "")
-        last -= 1;
+    const filled = (from) => { let at = from; while (at >= 0 && lines[at].trim() === "")
+        at -= 1; return at; };
+    const last = filled(lines.length - 1);
     if (last < 0)
         return undefined;
-    const line = lines[last].trim();
+    const at = /^default:/i.test(lines[last].trim()) ? filled(last - 1) : last;
+    const line = at < 0 ? "" : lines[at].trim();
     if (!NEEDS_INPUT.test(line))
         return undefined;
-    const question = [line.slice("NEEDS INPUT:".length), ...lines.slice(last + 1)].join("\n").trim();
+    const question = [line.slice("NEEDS INPUT:".length), ...lines.slice(at + 1)].join("\n").trim();
     return question || undefined;
 }
 export function view(a, parent) {
@@ -67,6 +71,14 @@ export function view(a, parent) {
         node.outcomeDetail = a.outcomeDetail;
     if (a.question !== undefined)
         node.question = a.question;
+    if (a.decide !== undefined)
+        node.decide = a.decide;
+    if (a.answer !== undefined)
+        node.answer = a.answer;
+    if (a.answeredBy !== undefined)
+        node.answeredBy = a.answeredBy;
+    if (a.carrying !== undefined)
+        node.carrying = a.carrying;
     if (a.cards !== undefined)
         node.cards = a.cards;
     if (a.continuation !== undefined)
@@ -88,6 +100,18 @@ export function view(a, parent) {
         node.restart = a.restart;
     return node;
 }
+function announcingWrites(store, wrote) {
+    const announced = (write) => (...args) => {
+        const result = write(...args);
+        wrote();
+        return result;
+    };
+    return { ...store, insert: announced(store.insert), update: announced(store.update), addInbox: announced(store.addInbox),
+        markDelivered: announced(store.markDelivered), prune: announced(store.prune) };
+}
+/** How often a request that joined another looks at it. */
+const JOIN_POLL_MS = 1_000;
+const JOINED_NOTE = "Another teammate asked this a moment ago, so it was answered once, for both of you:";
 export class RuntimeCoordinator {
     host;
     store;
@@ -106,7 +130,8 @@ export class RuntimeCoordinator {
         this.legacyThreads = options.legacyThreads;
         this.now = options.now ?? Date.now;
         this.log = options.log ?? ((line) => console.error("coordinator:", line));
-        this.store = openRuntimeStore(options.dataDir === ":memory:" ? ":memory:" : join(options.dataDir, "runtime.db"));
+        const store = openRuntimeStore(options.dataDir === ":memory:" ? ":memory:" : join(options.dataDir, "runtime.db"));
+        this.store = options.wrote ? announcingWrites(store, options.wrote) : store;
         this.runtime = new Runtime(this.store, this.runner(), {
             clock: { now: () => this.now(), monotonic: () => performance.now() },
             limits: { depth: 4, requests: REQUESTS_PER_ROOT, executions: EXECUTIONS_PER_ROOT, turnStallMs: TURN_STALL_MS, ...options.runtimeLimits },
@@ -145,6 +170,12 @@ export class RuntimeCoordinator {
         const a = this.store.get(id);
         return a && this.project(a);
     }
+    answersTo(id) {
+        this.ready();
+        const a = this.store.get(id);
+        const { botId, threadId } = a?.requester ?? {};
+        return a && botId && threadId && answersSender(a, "notify", { botId, threadId }) ? { botId, threadId } : undefined;
+    }
     has(id) {
         this.ready();
         return this.store.get(id) !== undefined;
@@ -179,7 +210,7 @@ export class RuntimeCoordinator {
         const kind = target.groupId !== undefined && target.groupId === source.groupId ? "assignment" : "work";
         const lineage = path(this.store, parent);
         const root = lineage[0];
-        if (lineage.some(n => ancestorOf(address(n), target)))
+        if (!answersSender(parent, mode, target) && lineage.some(n => ancestorOf(address(n), target)))
             throw new Error(ANCESTOR);
         const siblings = this.store.children(parent.id);
         const existing = siblings.findLast(c => c.assignee.botId === target.botId && c.assignee.destination.groupId === target.groupId && c.brief === brief && c.mode === mode);
@@ -194,7 +225,7 @@ export class RuntimeCoordinator {
         const reply = wanted === "none" ? "none" : root.reply === "poll" ? "poll" : wanted;
         const requester = { kind: "bot_turn", botId: parent.assignee.botId, threadId: parent.assignee.destination.threadId,
             chief: this.host.chiefOf(address(parent)), ...(parent.id === root.id && root.requester.runId !== undefined ? { runId: root.requester.runId } : {}) };
-        const level = this.host.levelOf(target, address(parent));
+        const level = this.host.levelOf(target, this.project(parent));
         const result = this.runtime.enqueue({
             parentId: parent.id,
             origin: parent.origin,
@@ -203,7 +234,7 @@ export class RuntimeCoordinator {
                     threadId: target.threadId, ...(target.groupId ? { groupId: target.groupId } : {}) } },
             mode, reply, brief: text, rework,
             ...(options.doneWhen ? { doneWhen: options.doneWhen } : {}),
-            levels: { own: level.level },
+            levels: { own: level.level, ...(level.chief !== undefined ? { chief: level.chief } : {}) },
             ...(level.driverKind !== undefined ? { driverKind: level.driverKind } : {}),
             approved: approvalGranted,
             ...(target.groupId && requestBatchKey ? { batchKey: requestBatchKey } : {}),
@@ -294,12 +325,16 @@ export class RuntimeCoordinator {
             ...(result.stalled ? { stalled: true } : {}) };
         this.runtime.end(id, end);
     }
-    answerNode(id, text) {
+    answerNode(id, text, by) {
         this.ready();
         const a = this.store.get(id);
         if (!a || a.status !== "needs_input")
             return false;
-        return this.runtime.answer(id, text);
+        return this.runtime.answer(id, text, by);
+    }
+    parkedFor(botId) {
+        this.ready();
+        return this.live().filter(n => n.status === "needs_input" && n.assignee.botId === botId).map(n => this.project(n));
     }
     answerRoot(id, text) {
         return this.answerNode(id, text);
@@ -407,6 +442,10 @@ export class RuntimeCoordinator {
         this.pruneDaily();
         this.runtime.tick();
     }
+    pace() {
+        this.ready();
+        return this.runtime.pace();
+    }
     pruneDaily() {
         const now = this.now();
         if (this.prunedAt !== undefined && now - this.prunedAt < PRUNE_EVERY_MS)
@@ -465,6 +504,12 @@ export class RuntimeCoordinator {
         };
     }
     async run(a, input, signal) {
+        const first = input.turn === "first" || input.turn === "rerun" ? this.answeredElsewhere(a) : undefined;
+        if (first && input.turn === "first")
+            this.host.joined?.(this.project(a), this.project(first));
+        const answer = first ? await this.joinAnswer(a, first.id, signal) : undefined;
+        if (answer)
+            return answer;
         const parent = a.parentId ? this.store.get(a.parentId) : undefined;
         const node = view(a, parent);
         const resumed = input.turn === "resume";
@@ -489,12 +534,53 @@ export class RuntimeCoordinator {
         if (!result.ok)
             return { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...evidence(result) };
         const question = root ? undefined : needsInputQuestion(result.text);
-        if (question !== undefined)
-            return { kind: "needs_input", question, ...evidence(result) };
-        return { kind: "completed", text: result.text, ...evidence(result) };
+        if (question === undefined)
+            return { kind: "completed", text: result.text, ...evidence(result) };
+        const named = withDefault(question);
+        const decide = requesterDecides(a) && !result.privateQuestion && !personOnly(named.question) ? { decide: named.default ? { default: named.default } : {} } : {};
+        return { kind: "needs_input", question, ...decide, ...evidence(result) };
     }
     live() {
         return this.store.all({ nonTerminal: true });
+    }
+    /** The same request to the same bot from another requester (same words, mode, approval level and finish line), asked
+     * earlier and still being answered when this one was asked, whose answer this one's requester may read
+     * (host.shareAnswer): two teammates asking the same thing at the same time get one answer. An answer from before this
+     * request was asked is never reused, as things may have changed since. Rooms keep their own turn order, and a request
+     * still to be answered in this one's conversation could only go on after it: neither is joined. */
+    answeredElsewhere(a) {
+        const share = this.host.shareAnswer;
+        if (!share || !a.parentId || a.mode === "notify" || a.rework || a.assignee.destination.groupId !== undefined)
+            return undefined;
+        const mine = this.project(a);
+        // In the order they were asked, each still open when this one was asked.
+        const rows = this.store.all({ openSince: a.createdAt });
+        const at = rows.findIndex(o => o.id === a.id);
+        return rows.slice(0, Math.max(at, 0))
+            .filter(o => o.parentId !== undefined && o.parentId !== a.parentId && !o.rework && o.mode === a.mode
+            && o.level === a.level && o.doneWhen === a.doneWhen
+            && o.assignee.botId === a.assignee.botId && o.assignee.destination.groupId === undefined
+            && (o.status === "completed" || (!isTerminal(o) && o.assignee.destination.threadId !== a.assignee.destination.threadId))
+            && sameRequest(o.brief, a.brief))
+            .find(o => share(this.project(o), mine));
+    }
+    /** Waits for the request `firstId` to be answered, keeping this one's turn out of the stall window, and ends with that
+     * answer. Undefined when it ends without one: this request is then worked on as usual. */
+    async joinAnswer(a, firstId, signal) {
+        this.log(`${a.id} joins ${firstId}: the same request to ${a.assignee.botId}`);
+        // One listener for the whole wait, however long the first takes.
+        const stopped = new Promise(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
+        for (;;) {
+            if (signal.aborted)
+                return { kind: "failed", outcome: "stopped", text: "" };
+            const first = this.store.get(firstId);
+            if (first?.status === "completed")
+                return { kind: "completed", text: `${JOINED_NOTE}\n${first.result.replace(`${JOINED_NOTE}\n`, "")}` };
+            if (!first || isTerminal(first))
+                return undefined;
+            this.runtime.progress(a.id);
+            await Promise.race([stopped, new Promise(resolve => setTimeout(resolve, JOIN_POLL_MS))]);
+        }
     }
     parkedIn(threadId) {
         return this.live().find(n => n.status === "needs_input" && n.assignee.destination.threadId === threadId);

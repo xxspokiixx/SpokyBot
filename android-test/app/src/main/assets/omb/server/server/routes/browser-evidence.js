@@ -55,7 +55,7 @@ export function createBrowserEvidenceRoutes(deps) {
         res.writeHead(200, {
             "content-type": "image/jpeg",
             "x-content-type-options": "nosniff",
-            "cache-control": "private, max-age=31536000, immutable",
+            "cache-control": "private, no-store",
         });
         await new Promise((resolve) => {
             const stream = createReadStream(file);

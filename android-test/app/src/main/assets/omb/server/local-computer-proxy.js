@@ -1,883 +1,98 @@
 import { createRequire as __ombCreateRequire } from "node:module";
 const require = __ombCreateRequire(import.meta.url);
+import{spawn}from"node:child_process";import{StringDecoder}from"node:string_decoder";var WAIT_WORDS="45 seconds",CONTROL_REFUSAL_PLAIN=`A person has taken control of this computer, so this call was NOT performed. Do not act until they hand it back \u2014 the screen is changing under their hands. To wait for them, take a screenshot: each computer call waits up to ${WAIT_WORDS} and returns as soon as they hand control back. Meanwhile you may work on anything that does not need this computer.`;var CONTROL_WAITED="This computer is free now, but this call had to wait for it, so it was NOT performed. Call again: the next call goes through at once. If you meant to click or type from an earlier screenshot, take a fresh one first \u2014 the screen may have changed while you waited.",CONTROL_BUSY=`Another thread is using this computer. This call was not performed. This turn gets the computer as soon as it is free: to keep waiting, take a screenshot (each computer call waits up to ${WAIT_WORDS}\
+) instead of ending your turn.`,CONTROL_UNCONFIRMED="SpokyBot could not confirm that this computer is free, so this call was NOT performed and nothing happened on the screen. Retry in a few seconds.",DISENGAGED={held:!1,helpOpen:!1},UNCONFIRMED={held:!0,helpOpen:!1,blockedReason:CONTROL_UNCONFIRMED};function controlRefusal(state){return state.blockedReason??(state.reason==="person"?CONTROL_REFUSAL_PLAIN:CONTROL_UNCONFIRMED)}function createControlClient(options){let url2=options?.url??process.
+env.OMB_CONTROL_URL??"",token2=options?.token??process.env.OMB_CONTROL_TOKEN??"",cacheMs=options?.cacheMs??750,timeoutMs=options?.timeoutMs??55e3,fetchImpl=options?.fetchImpl??fetch,configured=!!(url2&&token2),headers={authorization:`Bearer ${token2}`,"content-type":"application/json"},cachedAt=0,cached2=DISENGAGED;async function read(call){try{let target=url2;if(call&&Object.keys(call).length){let withCall=new URL(url2);for(let[key,value]of Object.entries(call))withCall.searchParams.set(key,value);
+target=withCall.href}let res=await fetchImpl(target,{headers,signal:AbortSignal.timeout(timeoutMs)});if(!res.ok)return UNCONFIRMED;let body=await res.json().catch(()=>null);return typeof body?.held!="boolean"||typeof body?.helpOpen!="boolean"?UNCONFIRMED:{held:body.held,helpOpen:body.helpOpen,...body.reason==="person"?{reason:"person"}:{},...typeof body.blockedReason=="string"&&body.blockedReason.trim()?{blockedReason:body.blockedReason}:{}}}catch{return UNCONFIRMED}}return{configured,async state(fresh=!1,call){
+if(!configured)return DISENGAGED;let now=Date.now();return!fresh&&!call&&now-cachedAt<cacheMs||(cached2=await read(call),cachedAt=Date.now()),cached2}}}import{execFile}from"node:child_process";import{closeSync,existsSync,openSync,readFileSync,readSync,statSync,readdirSync}from"node:fs";import{homedir}from"node:os";import{basename,delimiter,dirname,extname,join}from"node:path";function nvmBinDirs(){try{let base=join(homedir(),".nvm","versions","node");return readdirSync(base).filter(v=>v.startsWith("v")).sort((a,b)=>b.localeCompare(a,void 0,{numeric:!0})).map(v=>join(base,v,"bin"))}catch{return[]}}function sealedFixture(){return process.env.OMB_TEST_SEALED_PATH===
+"1"}function knownDirs(){let home=homedir();return[join(home,".local","bin"),join(home,".npm-global","bin"),join(home,".kimi-code","bin"),join(home,".grok","bin"),join(home,".opencode","bin"),join(home,".claude","local"),...sealedFixture()?[]:["/opt/homebrew/bin","/usr/local/bin"],join(home,".volta","bin"),join(home,".bun","bin"),join(home,".asdf","shims"),join(home,".local","share","mise","shims"),join(home,".deno","bin"),join(home,"bin"),...nvmBinDirs()]}function windowsKnownDirs(){let home=homedir(),
+appData=process.env.APPDATA??join(home,"AppData","Roaming"),localAppData=process.env.LOCALAPPDATA??join(home,"AppData","Local"),programFiles=process.env.ProgramFiles??"C:\\Program Files";return[join(appData,"npm"),join(home,".kimi-code","bin"),join(home,".grok","bin"),join(localAppData,"agy","bin"),join(localAppData,"cursor-agent"),join(home,".local","bin"),join(home,".claude","local"),join(home,"bin"),join(home,".bun","bin"),join(home,".deno","bin"),join(home,"go","bin"),join(programFiles,"Dock\
+er","Docker","resources","bin"),join(programFiles,"RedHat","Podman")]}var cached=null,probed=!1,loginShellPath=null,registeredDirs=[];var fallbackDirs=[];function augmentedPath(){if(cached===null){let fallback=fallbackDirs.filter(d=>existsSync(d));cached=mergePaths([...registeredDirs.filter(d=>existsSync(d)),...process.env.OMB_EXTRA_PATH?process.env.OMB_EXTRA_PATH.split(delimiter):[],...process.env.PATH?process.env.PATH.split(delimiter):[],...loginShellPath?loginShellPath.split(delimiter):[],...(process.platform==="win32"?windowsKnownDirs():knownDirs()).filter(d=>existsSync(d))].filter(d=>!fallback.includes(d)).concat(fallback))}return!probed&&!process.
+env.VITEST&&!sealedFixture()&&process.platform!=="win32"&&(probed=!0,probeLoginShellPath()),cached}function mergePaths(parts){return[...new Set(parts.filter(Boolean))].join(delimiter)}function probeLoginShellPath(){let shell=process.env.SHELL||"/bin/zsh";execFile(shell,["-l","-i","-c",'printf "__OMB_PATH__%s" "$PATH"'],{timeout:5e3},(err,stdout)=>{if(err||!stdout)return;let m=/__OMB_PATH__([^\n]*)/.exec(stdout);if(!m||!m[1])return;loginShellPath=m[1];let fallback=fallbackDirs.filter(d=>existsSync(
+d));cached=mergePaths([...(cached??"").split(delimiter).filter(d=>!fallback.includes(d)),...m[1].split(delimiter),...fallback])})}function splitCliString(cli){let out=[],cur="",quote=null;for(let ch of cli.trim())quote?ch===quote?quote=null:cur+=ch:ch==='"'||ch==="'"?quote=ch:/\s/.test(ch)?(cur&&out.push(cur),cur=""):cur+=ch;return cur&&out.push(cur),out}function isFile(p){try{return statSync(p,{throwIfNoEntry:!1})?.isFile()??!1}catch{return!1}}function whichWin(cli,env){let exts=((env??process.env).PATHEXT??".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean),probe=base=>(extname(base)?[base,...exts.map(e=>base+e)]:[...exts.
+map(e=>base+e),base]).find(isFile)??null;if(/[\\/]/.test(cli)||/^[a-zA-Z]:/.test(cli))return probe(cli);let path=env?env.PATH??env.Path??"":augmentedPath();for(let dir of path.split(delimiter)){if(!dir)continue;let hit=probe(join(dir,cli));if(hit)return hit}return null}function nodeExe(near,env){let local=join(near,"node.exe");if(isFile(local))return local;let onPath=whichWin("node.exe",env);return onPath&&extname(onPath).toLowerCase()===".exe"?onPath:process.versions.electron?null:process.execPath}
+var POWERSHELL_NAMES=new Set(["powershell.exe","pwsh.exe"]),POWERSHELL_COMMAND_SWITCHES=new Set(["c","command","e","ec","enc","encodedcommand"]);function isPowerShellCommandSwitch(token2){let name=token2.startsWith("-")||token2.startsWith("/")?token2.slice(1):token2,colon=name.indexOf(":");return colon>=0&&(name=name.slice(0,colon)),POWERSHELL_COMMAND_SWITCHES.has(name.toLowerCase())}function windowsSystemRoot(env){let source=env??process.env;return source.SystemRoot||source.WINDIR||process.env.
+SystemRoot||process.env.WINDIR||""}function expandWindowsRoot(token2,env){let root=windowsSystemRoot(env);return token2.replace(/%SystemRoot%/gi,()=>root).replace(/%WINDIR%/gi,()=>root)}function powerShellExecutable(token2,env){let expanded=expandWindowsRoot(token2,env);if(!POWERSHELL_NAMES.has(basename(expanded).toLowerCase()))return null;if(/[\\/]/.test(expanded)||/^[a-zA-Z]:/.test(expanded))return extname(expanded).toLowerCase()===".exe"&&isFile(expanded)?expanded:null;let hit=whichWin(expanded,
+env);return hit&&extname(hit).toLowerCase()===".exe"?hit:null}function siblingPowerShellScript(operand,shimDir){let prefix=/^(?:%SCRIPT_DIR%|%~dp0)\\?/i.exec(operand);if(!prefix&&/%[^%]+%/.test(operand))return null;let rest=prefix?operand.slice(prefix[0].length):operand;if(/%[^%]+%/.test(rest))return null;let absolute=/^[a-zA-Z]:[\\/]/.test(rest)||rest.startsWith("\\\\");if(!prefix&&!absolute)return null;let script=prefix?join(shimDir,rest):rest;return extname(script).toLowerCase()!==".ps1"||!isFile(
+script)||dirname(script).toLowerCase()!==shimDir.toLowerCase()?null:script}function parsePowerShellFileShim(shim,text,env){let shimDir=dirname(shim);for(let line of text.split(/\r?\n/)){let tokens=splitCliString(line),head=tokens[0];if(!head||tokens.length<3)continue;let command2=powerShellExecutable(head,env);if(!command2)continue;let rest=tokens.slice(1);if(rest.some(isPowerShellCommandSwitch))continue;let fileAt=rest.findIndex(token2=>token2.toLowerCase()==="-file"),operand=fileAt>=0?rest[fileAt+
+1]:void 0;if(!operand)continue;let script=siblingPowerShellScript(operand,shimDir);if(!script)continue;let args2=[];for(let index=0;index<rest.length;index++){let token2=rest[index];!token2||token2==="%*"||args2.push(index===fileAt+1?script:token2)}return{command:command2,args:args2}}return null}function parseCmdShim(shim,env){let text;try{text=readFileSync(shim,"utf8")}catch{return null}let dir=dirname(shim),npmEntry=/^SET "NP[MX]_CLI_JS=%~dp0\\([^"]+)"/im.exec(text),targets=[...npmEntry?[npmEntry]:
+[],...text.matchAll(/"%~?dp0%?\\?([^"]+)"/g)].map(m=>join(dir,m[1])).filter(p=>isFile(p)&&basename(p).toLowerCase()!=="node.exe"),script=targets.find(p=>/\.[cm]?js$/i.test(p));if(script){let node=nodeExe(dir,env);if(node)return{command:node,args:[script]}}let exe=targets.find(p=>extname(p).toLowerCase()===".exe");if(exe)return{command:exe,args:[]};for(let target of targets){let viaNode=parseNodeShebang(target,env);if(viaNode)return viaNode}return parsePowerShellFileShim(shim,text,env)}function parseNodeShebang(file,env){
+let head="",fd=null;try{fd=openSync(file,"r");let buf=Buffer.alloc(128),n=readSync(fd,buf,0,buf.length,0);head=buf.subarray(0,n).toString("utf8").split(`
+`,1)[0]}catch{return null}finally{if(fd!==null)try{closeSync(fd)}catch{}}if(!/^#!.*\bnode(\.exe)?\b/.test(head))return null;let node=nodeExe(dirname(file),env);return node?{command:node,args:[file]}:null}function resolveWord(cli,args2,env){if(process.platform!=="win32"){let path=env?env.PATH??env.Path??"":augmentedPath();for(let dir of path.split(delimiter)){if(!dir)continue;let candidate=join(dir,cli);if(isFile(candidate))return{command:candidate,args:args2}}return{command:cli,args:args2}}let file=whichWin(
+cli,env);if(!file)return{command:cli,args:args2};let ext=extname(file).toLowerCase();if(ext===".cmd"||ext===".bat"){let direct=parseCmdShim(file,env);return direct?{command:direct.command,args:[...direct.args,...args2]}:{command:file,args:args2}}if(ext===".exe"||ext===".com")return{command:file,args:args2};let viaNode=parseNodeShebang(file,env);return viaNode?{command:viaNode.command,args:[...viaNode.args,...args2]}:{command:file,args:args2}}function resolveCliSpawn(cli,args2,env){let trimmed=cli.
+trim();if(trimmed.includes(" ")&&existsSync(trimmed))return resolveWord(trimmed,args2,env);let split=splitCliString(cli);if(split.length>1||split[0]!==trimmed){let[head,...fixed]=split;return head?resolveWord(head,[...fixed,...args2],env):{command:cli,args:args2}}return resolveWord(cli,args2,env)}var ERROR_FLAG=/"isError"\s*:\s*true/u;function isObject(value){return!!value&&typeof value=="object"&&!Array.isArray(value)}var READ_AGAIN="an error result can carry only text. Call get_window_state for that window and take x,y from its new screenshot before any pixel action.",PROMISED_SCREENSHOT=/;\s*one follows, take x,y from it/gu;function omittedFromErrorNote(count){return count===1?`[The screenshot this error mentions was removed: ${READ_AGAIN}]`:`[The ${count} screenshots or other attachm\
+ents this error mentions were removed: ${READ_AGAIN}]`}function textOnlyErrorResult(result){if(!isObject(result)||result.isError!==!0||!Array.isArray(result.content))return result;let text=result.content.filter(item=>isObject(item)&&item.type==="text"&&typeof item.text=="string"),omitted=result.content.length-text.length;if(omitted===0)return result;let kept=text.map(item=>({...item,text:item.text.replace(PROMISED_SCREENSHOT,"; that screenshot was removed from this error")}));return{...result,content:[
+...kept,{type:"text",text:omittedFromErrorNote(omitted)}]}}function textOnlyErrorResultLine(line){if(!ERROR_FLAG.test(line))return line;let frame;try{frame=JSON.parse(line)}catch{return line}if(!isObject(frame))return line;let result=textOnlyErrorResult(frame.result);return result===frame.result?line:JSON.stringify({...frame,result})}var PROFILES={moonshot:{id:"moonshot",provider:"Kimi",maxSchemaBytes:12e3,maxDepth:30,measureInlined:!0}},TOOL_SCHEMA_PROFILE_ENV="OMB_TOOL_SCHEMA_PROFILE";function toolSchemaProfile(id){return typeof id=="string"&&Object.hasOwn(PROFILES,id)?PROFILES[id]:void 0}function toolSchemaProfileFromEnv(env=process.env){return toolSchemaProfile(env[TOOL_SCHEMA_PROFILE_ENV])}function isObject2(value){return!!value&&typeof value=="object"&&!Array.isArray(value)}function schemaBytes(value){let text=JSON.stringify(value)??"";return Buffer.byteLength(text)+5*(text.match(/[<>&]/g)?.length??0)+3*(text.match(/[\u2028\u2029]/g)?.length??0)}var MAP_SLOTS=["properties","patternProperties","dependentSchemas","$defs","definitions"],NESTED_SLOTS=["additionalProperties","items","additionalItems","contains","propertyNames","unevaluatedProperties","unevaluatedItems"],NESTED_LISTS=[
+"prefixItems","items"],ALTERNATIVE_LISTS=["anyOf","oneOf","allOf"],ALTERNATIVES=["not","if","then","else"];function walk(node,depth,visit){if(isObject2(node)){visit(node,depth);for(let slot of MAP_SLOTS)if(isObject2(node[slot]))for(let child of Object.values(node[slot]))walk(child,depth+1,visit);for(let slot of NESTED_SLOTS)walk(node[slot],depth+1,visit);for(let slot of NESTED_LISTS)if(Array.isArray(node[slot]))for(let item of node[slot])walk(item,depth+1,visit);for(let slot of ALTERNATIVE_LISTS)
+if(Array.isArray(node[slot]))for(let item of node[slot])walk(item,depth,visit);for(let slot of ALTERNATIVES)walk(node[slot],depth,visit)}}function schemaDepth(schema){let deepest=0;return walk(schema,0,(_node,depth)=>{deepest=Math.max(deepest,depth)}),deepest}function pointer(root,ref){if(ref==="#")return root;if(!ref.startsWith("#/"))return;let current=root;for(let raw of ref.slice(2).split("/")){let part=raw.replaceAll("~1","/").replaceAll("~0","~");if(Array.isArray(current)&&/^(?:0|[1-9]\d*)$/.
+test(part))current=current[Number(part)];else if(isObject2(current)&&Object.hasOwn(current,part))current=current[part];else return}return current}function dropUnusedDefinitions(schema){let rest=JSON.stringify(Object.fromEntries(Object.entries(schema).filter(([key])=>key!=="$defs"&&key!=="definitions")));for(let bucket of["$defs","definitions"])rest.includes(`"#/${bucket}/`)||delete schema[bucket]}var INLINE_NODE_BUDGET=2e5;function inlineRefs(schema){let nodes=0,resolve=(node,stack)=>{if(++nodes>
+INLINE_NODE_BUDGET)throw new RangeError("inline budget");if(Array.isArray(node))return node.map(item=>resolve(item,stack));if(!isObject2(node))return node;let ref=node.$ref,target=typeof ref=="string"&&!stack.has(ref)?pointer(schema,ref):void 0;if(typeof ref=="string"&&target!==void 0){stack.add(ref);let resolved=resolve(target,stack);if(stack.delete(ref),!isObject2(resolved))return resolved;let merged={...resolved};for(let[key,value]of Object.entries(node))key!=="$ref"&&(merged[key]=resolve(value,
+stack));return merged}return Object.fromEntries(Object.entries(node).map(([key,value])=>[key,resolve(value,stack)]))};try{let inlined=resolve(schema,new Set);return dropUnusedDefinitions(inlined),inlined}catch(error){if(error instanceof RangeError)return;throw error}}function fits(schema,profile){return schemaBytes(schema)<=profile.maxSchemaBytes&&schemaDepth(schema)<=profile.maxDepth}var ANNOTATIONS=new Set(["examples","example","$comment","title","deprecated","readOnly","writeOnly","$schema","\
+$id"]);function stripAnnotations(schema){walk(schema,0,node=>{for(let key of Object.keys(node))(ANNOTATIONS.has(key)||key.startsWith("x-"))&&delete node[key]})}function shortened(text,chars){if(typeof text!="string"||!text.trim()||chars<=0)return;let flat=text.replace(/\s+/g," ").trim();return flat.length<=chars?flat:`${flat.slice(0,chars-1).replace(/\s+\S*$/,"")}\u2026`}function shortenDescriptions(schema,fromDepth,chars){walk(schema,0,(node,depth)=>{if(depth<fromDepth)return;let description=shortened(
+node.description,chars);description?node.description=description:delete node.description})}var JSON_TYPES=["string","number","integer","boolean","object","array","null"];function valueType(value){return value===null?"null":Array.isArray(value)?"array":typeof value=="number"?Number.isInteger(value)?"integer":"number":typeof value=="object"?"object":typeof value}function typesOf(node,root,hops=0){if(hops>16)return[];if(typeof node.type=="string")return[node.type];if(Array.isArray(node.type))return node.
+type.filter(type=>typeof type=="string");let target=typeof node.$ref=="string"?pointer(root,node.$ref):void 0;if(isObject2(target))return typesOf(target,root,hops+1);let branches2=ALTERNATIVE_LISTS.flatMap(slot=>Array.isArray(node[slot])?node[slot].filter(isObject2):[]);return branches2.length?[...new Set(branches2.flatMap(branch=>typesOf(branch,root,hops+1)))]:Array.isArray(node.enum)&&node.enum.length?[...new Set(node.enum.map(valueType))]:"const"in node?[valueType(node.const)]:isObject2(node.
+properties)||"additionalProperties"in node||Array.isArray(node.required)?["object"]:"items"in node||"prefixItems"in node?["array"]:[]}function placeholder(node,root){let types=typesOf(node,root).filter(type2=>JSON_TYPES.includes(type2)),unique=[...new Set(types.map(type2=>type2==="integer"&&types.includes("number")?"number":type2))];if(unique.length!==1)return{type:unique.length?unique:JSON_TYPES};let type=unique[0];if(type==="object")return{type,additionalProperties:!0};let choices=Array.isArray(
+node.enum)?node.enum:"const"in node?[node.const]:void 0,sameType=value=>valueType(value)===type||type==="number"&&valueType(value)==="integer";return type!=="array"&&choices&&choices.length<=64&&choices.every(sameType)&&schemaBytes(choices)<=1024?{type,enum:choices}:{type}}function collapseAt(schema,depth){walk(schema,0,(node,at)=>{if(at===depth-1){for(let slot of MAP_SLOTS){let map=node[slot];if(isObject2(map))for(let[key,child]of Object.entries(map))isObject2(child)&&(map[key]=placeholder(child,
+schema))}for(let slot of NESTED_SLOTS)isObject2(node[slot])&&(node[slot]=placeholder(node[slot],schema));for(let slot of NESTED_LISTS){let list=node[slot];Array.isArray(list)&&list.forEach((item,index)=>{isObject2(item)&&(list[index]=placeholder(item,schema))})}}}),dropUnusedDefinitions(schema)}function topLevelOnly(schema,descriptionChars){let declared=isObject2(schema.properties)?schema.properties:{},properties={};for(let[key,child]of Object.entries(declared)){let flat=isObject2(child)?placeholder(
+child,schema):{type:JSON_TYPES},description=isObject2(child)?shortened(child.description,descriptionChars):void 0;properties[key]=description?{...flat,description}:flat}let required=Array.isArray(schema.required)?schema.required.filter(key=>typeof key=="string"&&Object.hasOwn(properties,key)):[];return{type:"object",properties,...required.length?{required}:{},additionalProperties:!0}}function fitToolSchema(schema,profile){let measured=profile.measureInlined?inlineRefs(schema):schema,from=schemaBytes(
+measured??schema);if(measured&&fits(measured,profile))return{outcome:"kept",schema,bytes:from};let fitted=(outcome,form)=>({outcome,schema:form,bytes:schemaBytes(form),from}),working=structuredClone(measured??schema);if(measured){if(stripAnnotations(working),fits(working,profile))return fitted("trimmed",working);for(let depth=schemaDepth(working);depth>=2;depth-=1)if(shortenDescriptions(working,depth,0),fits(working,profile))return fitted("trimmed",working);if(shortenDescriptions(working,0,300),
+fits(working,profile))return fitted("trimmed",working);for(let depth=schemaDepth(working);depth>=2;depth-=1)if(collapseAt(working,depth),fits(working,profile))return fitted("loosened",working)}for(let chars of[120,0]){let top=topLevelOnly(working,chars);if(fits(top,profile))return fitted("minimal",top)}return{outcome:"dropped",bytes:schemaBytes(topLevelOnly(working,0)),from}}var ROOT_COMBINATORS=["anyOf","oneOf","allOf","not"];function isObject3(value){return!!value&&typeof value=="object"&&!Array.isArray(value)}function branches(value){return Array.isArray(value)?value.filter(isObject3):[]}function objectShape(schema){let properties=isObject3(schema.properties)?{...schema.properties}:{},required=new Set(Array.isArray(schema.required)?schema.required.filter(key=>typeof key=="string"):[]),adopt=shape=>{for(let[key,value]of Object.entries(shape.properties))key in properties||
+(properties[key]=value)};for(let branch of branches(schema.allOf)){let shape=objectShape(branch);adopt(shape);for(let key of shape.required)required.add(key)}for(let keyword of["anyOf","oneOf"]){let choices=branches(schema[keyword]).map(objectShape);if(choices.length!==0){for(let choice of choices)adopt(choice);for(let key of choices[0].required)choices.every(choice=>choice.required.includes(key))&&required.add(key)}}return{properties,required:[...required]}}function describesObject(type){return type===
+void 0||type==="object"||Array.isArray(type)&&type.includes("object")}function providerSafeInputSchema(schema){if(!isObject3(schema)||!describesObject(schema.type))return{type:"object",properties:{}};if(schema.type==="object"&&ROOT_COMBINATORS.every(keyword=>!(keyword in schema)))return schema;let{properties,required}=objectShape(schema),safe={...schema,type:"object",properties};for(let keyword of ROOT_COMBINATORS)delete safe[keyword];return required.length>0?safe.required=required:delete safe.required,
+safe}function toolName(tool){return typeof tool.name=="string"&&tool.name?tool.name:"unnamed"}function shortenedToolNote(provider){return`(SpokyBot shortened this tool's parameters to fit ${provider}'s size limit for one tool: give any field it no longer lists as this description says. The tool still checks every call against its full schema.)`}function fitToolList(tools,profile,log=()=>{}){let fitted=[];for(let tool of tools){if(!isObject3(tool)){fitted.push(tool);continue}let rooted=providerSafeInputSchema(
+tool.inputSchema),fit=fitToolSchema(rooted,profile),name=toolName(tool),limit=`${profile.provider}'s ${profile.maxSchemaBytes}-byte limit for one tool`;if(fit.outcome==="dropped"){log(`left out tool "${name}": its parameters are ${fit.from} bytes and still ${fit.bytes} at their shortest, over ${limit}`);continue}if(fit.outcome==="kept"){fitted.push(fit.schema===tool.inputSchema?tool:{...tool,inputSchema:fit.schema});continue}let what={trimmed:"shortened the descriptions in",loosened:"left nested\
+ fields out of",minimal:"kept only the top-level fields of"}[fit.outcome];if(log(`${what} tool "${name}"'s parameters (${fit.from} to ${fit.bytes} bytes) to fit ${limit}`),fit.outcome==="trimmed"){fitted.push({...tool,inputSchema:fit.schema});continue}let description=typeof tool.description=="string"&&tool.description.trim()?`${tool.description.trimEnd()}
 
-// server/mcp-bridge.ts
-import { spawn } from "node:child_process";
-import { StringDecoder } from "node:string_decoder";
-
-// server/control-client.ts
-var CONTROL_WAIT_MS = 45e3;
-var CONTROL_ACT_WITHIN_MS = 5e3;
-var READ_TIMEOUT_MS = CONTROL_WAIT_MS + 1e4;
-var WAIT_WORDS = `${CONTROL_WAIT_MS / 1e3} seconds`;
-var CONTROL_REFUSAL_PLAIN = `A person has taken control of this computer, so this call was NOT performed. Do not act until they hand it back \u2014 the screen is changing under their hands. To wait for them, take a screenshot: each computer call waits up to ${WAIT_WORDS} and returns as soon as they hand control back. Meanwhile you may work on anything that does not need this computer.`;
-var CONTROL_WAITED = "This computer is free now, but this call had to wait for it, so it was NOT performed. Call again: the next call goes through at once. If you meant to click or type from an earlier screenshot, take a fresh one first \u2014 the screen may have changed while you waited.";
-var CONTROL_BUSY = `Another thread is using this computer. This call was not performed. This turn gets the computer as soon as it is free: to keep waiting, take a screenshot (each computer call waits up to ${WAIT_WORDS}) instead of ending your turn.`;
-var CONTROL_UNCONFIRMED = "SpokyBot could not confirm that this computer is free, so this call was NOT performed and nothing happened on the screen. Retry in a few seconds.";
-var DISENGAGED = { held: false, helpOpen: false };
-var UNCONFIRMED = { held: true, helpOpen: false, blockedReason: CONTROL_UNCONFIRMED };
-function controlRefusal(state) {
-  return state.blockedReason ?? (state.reason === "person" ? CONTROL_REFUSAL_PLAIN : CONTROL_UNCONFIRMED);
-}
-function createControlClient(options) {
-  const url2 = options?.url ?? process.env.OMB_CONTROL_URL ?? "";
-  const token2 = options?.token ?? process.env.OMB_CONTROL_TOKEN ?? "";
-  const cacheMs = options?.cacheMs ?? 750;
-  const timeoutMs = options?.timeoutMs ?? READ_TIMEOUT_MS;
-  const fetchImpl = options?.fetchImpl ?? fetch;
-  const configured = Boolean(url2 && token2);
-  const headers = { authorization: `Bearer ${token2}`, "content-type": "application/json" };
-  let cachedAt = 0;
-  let cached2 = DISENGAGED;
-  async function read() {
-    try {
-      const res = await fetchImpl(url2, { headers, signal: AbortSignal.timeout(timeoutMs) });
-      if (!res.ok) return UNCONFIRMED;
-      const body = await res.json().catch(() => null);
-      if (typeof body?.held !== "boolean" || typeof body?.helpOpen !== "boolean") return UNCONFIRMED;
-      return {
-        held: body.held,
-        helpOpen: body.helpOpen,
-        ...body.reason === "person" ? { reason: "person" } : {},
-        ...typeof body.blockedReason === "string" && body.blockedReason.trim() ? { blockedReason: body.blockedReason } : {}
-      };
-    } catch {
-      return UNCONFIRMED;
-    }
-  }
-  return {
-    configured,
-    async state(fresh = false) {
-      if (!configured) return DISENGAGED;
-      const now = Date.now();
-      if (!fresh && now - cachedAt < cacheMs) return cached2;
-      cached2 = await read();
-      cachedAt = Date.now();
-      return cached2;
-    }
-  };
-}
-
-// server/env-path.ts
-import { execFile } from "node:child_process";
-import { closeSync, existsSync, openSync, readFileSync, readSync, statSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
-import { basename, delimiter, dirname, extname, join } from "node:path";
-function nvmBinDirs() {
-  try {
-    const base = join(homedir(), ".nvm", "versions", "node");
-    return readdirSync(base).filter((v) => v.startsWith("v")).sort((a, b) => b.localeCompare(a, void 0, { numeric: true })).map((v) => join(base, v, "bin"));
-  } catch {
-    return [];
-  }
-}
-function sealedFixture() {
-  return process.env.OMB_TEST_SEALED_PATH === "1";
-}
-function knownDirs() {
-  const home = homedir();
-  return [
-    join(home, ".local", "bin"),
-    // claude installer default
-    join(home, ".npm-global", "bin"),
-    // npm prefix ~/.npm-global (claude, opencode)
-    join(home, ".kimi-code", "bin"),
-    // kimi-code installer
-    join(home, ".grok", "bin"),
-    // x.ai installer
-    join(home, ".opencode", "bin"),
-    // opencode installer
-    join(home, ".claude", "local"),
-    // claude "local install"
-    ...sealedFixture() ? [] : [
-      "/opt/homebrew/bin",
-      // brew, Apple silicon
-      "/usr/local/bin"
-      // brew Intel / classic installs
-    ],
-    join(home, ".volta", "bin"),
-    join(home, ".bun", "bin"),
-    join(home, ".asdf", "shims"),
-    join(home, ".local", "share", "mise", "shims"),
-    // mise installer
-    join(home, ".deno", "bin"),
-    join(home, "bin"),
-    ...nvmBinDirs()
-  ];
-}
-function windowsKnownDirs() {
-  const home = homedir();
-  const appData = process.env.APPDATA ?? join(home, "AppData", "Roaming");
-  const localAppData = process.env.LOCALAPPDATA ?? join(home, "AppData", "Local");
-  const programFiles = process.env.ProgramFiles ?? "C:\\Program Files";
-  return [
-    join(appData, "npm"),
-    // npm -g shims: claude, codex
-    join(home, ".kimi-code", "bin"),
-    // recover Kimi installs after a GUI launch too
-    join(home, ".grok", "bin"),
-    // x.ai installer
-    join(localAppData, "agy", "bin"),
-    // Antigravity installer
-    // Cursor installer: cursor-agent.* and its `agent` copies
-    join(localAppData, "cursor-agent"),
-    join(home, ".local", "bin"),
-    // claude native installer
-    join(home, ".claude", "local"),
-    join(home, "bin"),
-    // Factory droid installer (%USERPROFILE%\bin)
-    join(home, ".bun", "bin"),
-    join(home, ".deno", "bin"),
-    join(home, "go", "bin"),
-    join(programFiles, "Docker", "Docker", "resources", "bin"),
-    // Docker Desktop installer
-    join(programFiles, "RedHat", "Podman")
-    // Podman installer, also run by Podman Desktop
-  ];
-}
-var cached = null;
-var probed = false;
-var loginShellPath = null;
-var registeredDirs = [];
-function augmentedPath() {
-  if (cached === null) {
-    cached = mergePaths([
-      ...registeredDirs.filter((d) => existsSync(d)),
-      ...process.env.OMB_EXTRA_PATH ? process.env.OMB_EXTRA_PATH.split(delimiter) : [],
-      ...process.env.PATH ? process.env.PATH.split(delimiter) : [],
-      // Keep the last login-shell result while a rescan re-probes, or rc-only CLIs vanish for the response that triggered it.
-      ...loginShellPath ? loginShellPath.split(delimiter) : [],
-      ...(process.platform === "win32" ? windowsKnownDirs() : knownDirs()).filter((d) => existsSync(d))
-    ]);
-  }
-  if (!probed && !process.env.VITEST && !sealedFixture() && process.platform !== "win32") {
-    probed = true;
-    probeLoginShellPath();
-  }
-  return cached;
-}
-function mergePaths(parts) {
-  return [...new Set(parts.filter(Boolean))].join(delimiter);
-}
-function probeLoginShellPath() {
-  const shell = process.env.SHELL || "/bin/zsh";
-  execFile(
-    shell,
-    ["-l", "-i", "-c", 'printf "__OMB_PATH__%s" "$PATH"'],
-    { timeout: 5e3 },
-    (err, stdout) => {
-      if (err || !stdout) return;
-      const m = /__OMB_PATH__([^\n]*)/.exec(stdout);
-      if (!m || !m[1]) return;
-      loginShellPath = m[1];
-      cached = mergePaths([...(cached ?? "").split(delimiter), ...m[1].split(delimiter)]);
-    }
-  );
-}
-function splitCliString(cli) {
-  const out = [];
-  let cur = "";
-  let quote = null;
-  for (const ch of cli.trim()) {
-    if (quote) {
-      if (ch === quote) quote = null;
-      else cur += ch;
-    } else if (ch === '"' || ch === "'") {
-      quote = ch;
-    } else if (/\s/.test(ch)) {
-      if (cur) out.push(cur);
-      cur = "";
-    } else {
-      cur += ch;
-    }
-  }
-  if (cur) out.push(cur);
-  return out;
-}
-function isFile(p) {
-  try {
-    return statSync(p, { throwIfNoEntry: false })?.isFile() ?? false;
-  } catch {
-    return false;
-  }
-}
-function whichWin(cli, env) {
-  const exts = ((env ?? process.env).PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
-  const probe = (base) => {
-    const order = extname(base) ? [base, ...exts.map((e) => base + e)] : [...exts.map((e) => base + e), base];
-    return order.find(isFile) ?? null;
-  };
-  if (/[\\/]/.test(cli) || /^[a-zA-Z]:/.test(cli)) return probe(cli);
-  const path = env ? env.PATH ?? env.Path ?? "" : augmentedPath();
-  for (const dir of path.split(delimiter)) {
-    if (!dir) continue;
-    const hit = probe(join(dir, cli));
-    if (hit) return hit;
-  }
-  return null;
-}
-function nodeExe(near, env) {
-  const local = join(near, "node.exe");
-  if (isFile(local)) return local;
-  const onPath = whichWin("node.exe", env);
-  if (onPath && extname(onPath).toLowerCase() === ".exe") return onPath;
-  return process.versions.electron ? null : process.execPath;
-}
-function parseCmdShim(shim, env) {
-  let text;
-  try {
-    text = readFileSync(shim, "utf8");
-  } catch {
-    return null;
-  }
-  const dir = dirname(shim);
-  const npmEntry = /^SET "NP[MX]_CLI_JS=%~dp0\\([^"]+)"/im.exec(text);
-  const targets = [...npmEntry ? [npmEntry] : [], ...text.matchAll(/"%~?dp0%?\\?([^"]+)"/g)].map((m) => join(dir, m[1])).filter((p) => isFile(p) && basename(p).toLowerCase() !== "node.exe");
-  const script = targets.find((p) => /\.[cm]?js$/i.test(p));
-  if (script) {
-    const node = nodeExe(dir, env);
-    if (node) return { command: node, args: [script] };
-  }
-  const exe = targets.find((p) => extname(p).toLowerCase() === ".exe");
-  return exe ? { command: exe, args: [] } : null;
-}
-function parseNodeShebang(file, env) {
-  let head = "";
-  let fd = null;
-  try {
-    fd = openSync(file, "r");
-    const buf = Buffer.alloc(128);
-    const n = readSync(fd, buf, 0, buf.length, 0);
-    head = buf.subarray(0, n).toString("utf8").split("\n", 1)[0];
-  } catch {
-    return null;
-  } finally {
-    if (fd !== null) {
-      try {
-        closeSync(fd);
-      } catch {
-      }
-    }
-  }
-  if (!/^#!.*\bnode(\.exe)?\b/.test(head)) return null;
-  const node = nodeExe(dirname(file), env);
-  return node ? { command: node, args: [file] } : null;
-}
-function resolveWord(cli, args2, env) {
-  if (process.platform !== "win32") return { command: cli, args: args2 };
-  const file = whichWin(cli, env);
-  if (!file) return { command: cli, args: args2 };
-  const ext = extname(file).toLowerCase();
-  if (ext === ".cmd" || ext === ".bat") {
-    const direct = parseCmdShim(file, env);
-    return direct ? { command: direct.command, args: [...direct.args, ...args2] } : { command: file, args: args2 };
-  }
-  if (ext === ".exe" || ext === ".com") return { command: file, args: args2 };
-  const viaNode = parseNodeShebang(file, env);
-  return viaNode ? { command: viaNode.command, args: [...viaNode.args, ...args2] } : { command: file, args: args2 };
-}
-function resolveCliSpawn(cli, args2, env) {
-  const trimmed = cli.trim();
-  if (trimmed.includes(" ") && existsSync(trimmed)) return resolveWord(trimmed, args2, env);
-  const split = splitCliString(cli);
-  if (split.length > 1 || split[0] !== trimmed) {
-    const [head, ...fixed] = split;
-    if (!head) return { command: cli, args: args2 };
-    return resolveWord(head, [...fixed, ...args2], env);
-  }
-  return resolveWord(cli, args2, env);
-}
-
-// server/mcp-error-result.ts
-var ERROR_FLAG = /"isError"\s*:\s*true/u;
-function isObject(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-var READ_AGAIN = "an error result can carry only text. Call get_window_state for that window and take x,y from its new screenshot before any pixel action.";
-var PROMISED_SCREENSHOT = /;\s*one follows, take x,y from it/gu;
-function omittedFromErrorNote(count) {
-  return count === 1 ? `[The screenshot this error mentions was removed: ${READ_AGAIN}]` : `[The ${count} screenshots or other attachments this error mentions were removed: ${READ_AGAIN}]`;
-}
-function textOnlyErrorResult(result) {
-  if (!isObject(result) || result.isError !== true || !Array.isArray(result.content)) return result;
-  const text = result.content.filter((item) => isObject(item) && item.type === "text" && typeof item.text === "string");
-  const omitted = result.content.length - text.length;
-  if (omitted === 0) return result;
-  const kept = text.map((item) => ({ ...item, text: item.text.replace(PROMISED_SCREENSHOT, "; that screenshot was removed from this error") }));
-  return { ...result, content: [...kept, { type: "text", text: omittedFromErrorNote(omitted) }] };
-}
-function textOnlyErrorResultLine(line) {
-  if (!ERROR_FLAG.test(line)) return line;
-  let frame;
-  try {
-    frame = JSON.parse(line);
-  } catch {
-    return line;
-  }
-  if (!isObject(frame)) return line;
-  const result = textOnlyErrorResult(frame.result);
-  return result === frame.result ? line : JSON.stringify({ ...frame, result });
-}
-
-// server/tool-schema-profile.ts
-var PROFILES = {
-  // Moonshot refuses the whole request when one tool's `function.parameters`, as Go's encoding/json writes it, passes an
-  // undocumented size (about 13.7 KB accepted, 15 KB refused): https://github.com/MoonshotAI/kimi-code/issues/4231,
-  // https://github.com/morluto/rea/issues/3654. Depth 30 is walle's default (https://github.com/MoonshotAI/walle/blob/main/conf.go).
-  // Kimi Code inlines every local $ref first (normalizeKimiToolSchema in MoonshotAI/kimi-code packages/kosong).
-  moonshot: { id: "moonshot", provider: "Kimi", maxSchemaBytes: 12e3, maxDepth: 30, measureInlined: true }
-};
-var TOOL_SCHEMA_PROFILE_ENV = "OMB_TOOL_SCHEMA_PROFILE";
-function toolSchemaProfile(id) {
-  return typeof id === "string" && Object.hasOwn(PROFILES, id) ? PROFILES[id] : void 0;
-}
-function toolSchemaProfileFromEnv(env = process.env) {
-  return toolSchemaProfile(env[TOOL_SCHEMA_PROFILE_ENV]);
-}
-function isObject2(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-function schemaBytes(value) {
-  const text = JSON.stringify(value) ?? "";
-  return Buffer.byteLength(text) + 5 * (text.match(/[<>&]/g)?.length ?? 0) + 3 * (text.match(/[\u2028\u2029]/g)?.length ?? 0);
-}
-var MAP_SLOTS = ["properties", "patternProperties", "dependentSchemas", "$defs", "definitions"];
-var NESTED_SLOTS = ["additionalProperties", "items", "additionalItems", "contains", "propertyNames", "unevaluatedProperties", "unevaluatedItems"];
-var NESTED_LISTS = ["prefixItems", "items"];
-var ALTERNATIVE_LISTS = ["anyOf", "oneOf", "allOf"];
-var ALTERNATIVES = ["not", "if", "then", "else"];
-function walk(node, depth, visit) {
-  if (!isObject2(node)) return;
-  visit(node, depth);
-  for (const slot of MAP_SLOTS) if (isObject2(node[slot])) for (const child of Object.values(node[slot])) walk(child, depth + 1, visit);
-  for (const slot of NESTED_SLOTS) walk(node[slot], depth + 1, visit);
-  for (const slot of NESTED_LISTS) if (Array.isArray(node[slot])) for (const item of node[slot]) walk(item, depth + 1, visit);
-  for (const slot of ALTERNATIVE_LISTS) if (Array.isArray(node[slot])) for (const item of node[slot]) walk(item, depth, visit);
-  for (const slot of ALTERNATIVES) walk(node[slot], depth, visit);
-}
-function schemaDepth(schema) {
-  let deepest = 0;
-  walk(schema, 0, (_node, depth) => {
-    deepest = Math.max(deepest, depth);
-  });
-  return deepest;
-}
-function pointer(root, ref) {
-  if (ref === "#") return root;
-  if (!ref.startsWith("#/")) return void 0;
-  let current = root;
-  for (const raw of ref.slice(2).split("/")) {
-    const part = raw.replaceAll("~1", "/").replaceAll("~0", "~");
-    if (Array.isArray(current) && /^(?:0|[1-9]\d*)$/.test(part)) current = current[Number(part)];
-    else if (isObject2(current) && Object.hasOwn(current, part)) current = current[part];
-    else return void 0;
-  }
-  return current;
-}
-function dropUnusedDefinitions(schema) {
-  const rest = JSON.stringify(Object.fromEntries(Object.entries(schema).filter(([key]) => key !== "$defs" && key !== "definitions")));
-  for (const bucket of ["$defs", "definitions"]) if (!rest.includes(`"#/${bucket}/`)) delete schema[bucket];
-}
-var INLINE_NODE_BUDGET = 2e5;
-function inlineRefs(schema) {
-  let nodes = 0;
-  const resolve = (node, stack) => {
-    if (++nodes > INLINE_NODE_BUDGET) throw new RangeError("inline budget");
-    if (Array.isArray(node)) return node.map((item) => resolve(item, stack));
-    if (!isObject2(node)) return node;
-    const ref = node.$ref;
-    const target = typeof ref === "string" && !stack.has(ref) ? pointer(schema, ref) : void 0;
-    if (typeof ref === "string" && target !== void 0) {
-      stack.add(ref);
-      const resolved = resolve(target, stack);
-      stack.delete(ref);
-      if (!isObject2(resolved)) return resolved;
-      const merged = { ...resolved };
-      for (const [key, value] of Object.entries(node)) if (key !== "$ref") merged[key] = resolve(value, stack);
-      return merged;
-    }
-    return Object.fromEntries(Object.entries(node).map(([key, value]) => [key, resolve(value, stack)]));
-  };
-  try {
-    const inlined = resolve(schema, /* @__PURE__ */ new Set());
-    dropUnusedDefinitions(inlined);
-    return inlined;
-  } catch (error) {
-    if (error instanceof RangeError) return void 0;
-    throw error;
-  }
-}
-function fits(schema, profile) {
-  return schemaBytes(schema) <= profile.maxSchemaBytes && schemaDepth(schema) <= profile.maxDepth;
-}
-var ANNOTATIONS = /* @__PURE__ */ new Set(["examples", "example", "$comment", "title", "deprecated", "readOnly", "writeOnly", "$schema", "$id"]);
-function stripAnnotations(schema) {
-  walk(schema, 0, (node) => {
-    for (const key of Object.keys(node)) if (ANNOTATIONS.has(key) || key.startsWith("x-")) delete node[key];
-  });
-}
-function shortened(text, chars) {
-  if (typeof text !== "string" || !text.trim() || chars <= 0) return void 0;
-  const flat = text.replace(/\s+/g, " ").trim();
-  return flat.length <= chars ? flat : `${flat.slice(0, chars - 1).replace(/\s+\S*$/, "")}\u2026`;
-}
-function shortenDescriptions(schema, fromDepth, chars) {
-  walk(schema, 0, (node, depth) => {
-    if (depth < fromDepth) return;
-    const description = shortened(node.description, chars);
-    if (description) node.description = description;
-    else delete node.description;
-  });
-}
-var JSON_TYPES = ["string", "number", "integer", "boolean", "object", "array", "null"];
-function valueType(value) {
-  if (value === null) return "null";
-  if (Array.isArray(value)) return "array";
-  if (typeof value === "number") return Number.isInteger(value) ? "integer" : "number";
-  return typeof value === "object" ? "object" : typeof value;
-}
-function typesOf(node, root, hops = 0) {
-  if (hops > 16) return [];
-  if (typeof node.type === "string") return [node.type];
-  if (Array.isArray(node.type)) return node.type.filter((type) => typeof type === "string");
-  const target = typeof node.$ref === "string" ? pointer(root, node.$ref) : void 0;
-  if (isObject2(target)) return typesOf(target, root, hops + 1);
-  const branches2 = ALTERNATIVE_LISTS.flatMap((slot) => Array.isArray(node[slot]) ? node[slot].filter(isObject2) : []);
-  if (branches2.length) return [...new Set(branches2.flatMap((branch) => typesOf(branch, root, hops + 1)))];
-  if (Array.isArray(node.enum) && node.enum.length) return [...new Set(node.enum.map(valueType))];
-  if ("const" in node) return [valueType(node.const)];
-  if (isObject2(node.properties) || "additionalProperties" in node || Array.isArray(node.required)) return ["object"];
-  if ("items" in node || "prefixItems" in node) return ["array"];
-  return [];
-}
-function placeholder(node, root) {
-  const types = typesOf(node, root).filter((type2) => JSON_TYPES.includes(type2));
-  const unique = [...new Set(types.map((type2) => type2 === "integer" && types.includes("number") ? "number" : type2))];
-  if (unique.length !== 1) return { type: unique.length ? unique : JSON_TYPES };
-  const type = unique[0];
-  if (type === "object") return { type, additionalProperties: true };
-  const choices = Array.isArray(node.enum) ? node.enum : "const" in node ? [node.const] : void 0;
-  const sameType = (value) => valueType(value) === type || type === "number" && valueType(value) === "integer";
-  const keep = type !== "array" && choices && choices.length <= 64 && choices.every(sameType) && schemaBytes(choices) <= 1024;
-  return keep ? { type, enum: choices } : { type };
-}
-function collapseAt(schema, depth) {
-  walk(schema, 0, (node, at) => {
-    if (at !== depth - 1) return;
-    for (const slot of MAP_SLOTS) {
-      const map = node[slot];
-      if (isObject2(map)) {
-        for (const [key, child] of Object.entries(map)) if (isObject2(child)) map[key] = placeholder(child, schema);
-      }
-    }
-    for (const slot of NESTED_SLOTS) if (isObject2(node[slot])) node[slot] = placeholder(node[slot], schema);
-    for (const slot of NESTED_LISTS) {
-      const list = node[slot];
-      if (Array.isArray(list)) list.forEach((item, index) => {
-        if (isObject2(item)) list[index] = placeholder(item, schema);
-      });
-    }
-  });
-  dropUnusedDefinitions(schema);
-}
-function topLevelOnly(schema, descriptionChars) {
-  const declared = isObject2(schema.properties) ? schema.properties : {};
-  const properties = {};
-  for (const [key, child] of Object.entries(declared)) {
-    const flat = isObject2(child) ? placeholder(child, schema) : { type: JSON_TYPES };
-    const description = isObject2(child) ? shortened(child.description, descriptionChars) : void 0;
-    properties[key] = description ? { ...flat, description } : flat;
-  }
-  const required = Array.isArray(schema.required) ? schema.required.filter((key) => typeof key === "string" && Object.hasOwn(properties, key)) : [];
-  return { type: "object", properties, ...required.length ? { required } : {}, additionalProperties: true };
-}
-function fitToolSchema(schema, profile) {
-  const measured = profile.measureInlined ? inlineRefs(schema) : schema;
-  const from = schemaBytes(measured ?? schema);
-  if (measured && fits(measured, profile)) return { outcome: "kept", schema, bytes: from };
-  const fitted = (outcome, form) => ({ outcome, schema: form, bytes: schemaBytes(form), from });
-  const working = structuredClone(measured ?? schema);
-  if (measured) {
-    stripAnnotations(working);
-    if (fits(working, profile)) return fitted("trimmed", working);
-    for (let depth = schemaDepth(working); depth >= 2; depth -= 1) {
-      shortenDescriptions(working, depth, 0);
-      if (fits(working, profile)) return fitted("trimmed", working);
-    }
-    shortenDescriptions(working, 0, 300);
-    if (fits(working, profile)) return fitted("trimmed", working);
-    for (let depth = schemaDepth(working); depth >= 2; depth -= 1) {
-      collapseAt(working, depth);
-      if (fits(working, profile)) return fitted("loosened", working);
-    }
-  }
-  for (const chars of [120, 0]) {
-    const top = topLevelOnly(working, chars);
-    if (fits(top, profile)) return fitted("minimal", top);
-  }
-  return { outcome: "dropped", bytes: schemaBytes(topLevelOnly(working, 0)), from };
-}
-
-// server/mcp-tool-schema.ts
-var ROOT_COMBINATORS = ["anyOf", "oneOf", "allOf", "not"];
-function isObject3(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-function branches(value) {
-  return Array.isArray(value) ? value.filter(isObject3) : [];
-}
-function objectShape(schema) {
-  const properties = isObject3(schema.properties) ? { ...schema.properties } : {};
-  const required = new Set(Array.isArray(schema.required) ? schema.required.filter((key) => typeof key === "string") : []);
-  const adopt = (shape) => {
-    for (const [key, value] of Object.entries(shape.properties)) if (!(key in properties)) properties[key] = value;
-  };
-  for (const branch of branches(schema.allOf)) {
-    const shape = objectShape(branch);
-    adopt(shape);
-    for (const key of shape.required) required.add(key);
-  }
-  for (const keyword of ["anyOf", "oneOf"]) {
-    const choices = branches(schema[keyword]).map(objectShape);
-    if (choices.length === 0) continue;
-    for (const choice of choices) adopt(choice);
-    for (const key of choices[0].required) {
-      if (choices.every((choice) => choice.required.includes(key))) required.add(key);
-    }
-  }
-  return { properties, required: [...required] };
-}
-function describesObject(type) {
-  return type === void 0 || type === "object" || Array.isArray(type) && type.includes("object");
-}
-function providerSafeInputSchema(schema) {
-  if (!isObject3(schema) || !describesObject(schema.type)) return { type: "object", properties: {} };
-  if (schema.type === "object" && ROOT_COMBINATORS.every((keyword) => !(keyword in schema))) return schema;
-  const { properties, required } = objectShape(schema);
-  const safe = { ...schema, type: "object", properties };
-  for (const keyword of ROOT_COMBINATORS) delete safe[keyword];
-  if (required.length > 0) safe.required = required;
-  else delete safe.required;
-  return safe;
-}
-function toolName(tool) {
-  return typeof tool.name === "string" && tool.name ? tool.name : "unnamed";
-}
-function shortenedToolNote(provider) {
-  return `(SpokyBot shortened this tool's parameters to fit ${provider}'s size limit for one tool: give any field it no longer lists as this description says. The tool still checks every call against its full schema.)`;
-}
-function fitToolList(tools, profile, log = () => {
-}) {
-  const fitted = [];
-  for (const tool of tools) {
-    if (!isObject3(tool)) {
-      fitted.push(tool);
-      continue;
-    }
-    const rooted = providerSafeInputSchema(tool.inputSchema);
-    const fit = fitToolSchema(rooted, profile);
-    const name = toolName(tool);
-    const limit = `${profile.provider}'s ${profile.maxSchemaBytes}-byte limit for one tool`;
-    if (fit.outcome === "dropped") {
-      log(`left out tool "${name}": its parameters are ${fit.from} bytes and still ${fit.bytes} at their shortest, over ${limit}`);
-      continue;
-    }
-    if (fit.outcome === "kept") {
-      fitted.push(fit.schema === tool.inputSchema ? tool : { ...tool, inputSchema: fit.schema });
-      continue;
-    }
-    const what = { trimmed: "shortened the descriptions in", loosened: "left nested fields out of", minimal: "kept only the top-level fields of" }[fit.outcome];
-    log(`${what} tool "${name}"'s parameters (${fit.from} to ${fit.bytes} bytes) to fit ${limit}`);
-    if (fit.outcome === "trimmed") {
-      fitted.push({ ...tool, inputSchema: fit.schema });
-      continue;
-    }
-    const description = typeof tool.description === "string" && tool.description.trim() ? `${tool.description.trimEnd()}
-
-` : "";
-    fitted.push({ ...tool, description: description + shortenedToolNote(profile.provider), inputSchema: fit.schema });
-  }
-  return fitted;
-}
-function createToolListNormalizer(profile, log) {
-  const pending = /* @__PURE__ */ new Set();
-  const idKey = (id) => `${typeof id}:${String(id)}`;
-  return {
-    observeRequest(line) {
-      let frame;
-      try {
-        frame = JSON.parse(line);
-      } catch {
-        return;
-      }
-      if (isObject3(frame) && frame.method === "tools/list" && (typeof frame.id === "number" || typeof frame.id === "string")) {
-        pending.add(idKey(frame.id));
-      }
-    },
-    rewriteResponse(line) {
-      if (pending.size === 0) return line;
-      let frame;
-      try {
-        frame = JSON.parse(line);
-      } catch {
-        return line;
-      }
-      if (!isObject3(frame) || "method" in frame || !pending.delete(idKey(frame.id))) return line;
-      if (!isObject3(frame.result) || !Array.isArray(frame.result.tools)) return line;
-      const listed = frame.result.tools;
-      const tools = profile ? fitToolList(listed, profile, log) : listed.map((tool) => {
-        if (!isObject3(tool)) return tool;
-        const inputSchema = providerSafeInputSchema(tool.inputSchema);
-        return inputSchema === tool.inputSchema ? tool : { ...tool, inputSchema };
-      });
-      const changed = tools.length !== listed.length || tools.some((tool, index) => tool !== listed[index]);
-      return changed ? JSON.stringify({ ...frame, result: { ...frame.result, tools } }) : line;
-    }
-  };
-}
-
-// server/mcp-bridge.ts
-var BRIDGE_INACTIVITY_MS = 45e3;
-var PROBE_TIMEOUT_MS = 1e4;
-function runLivenessProbe(probe, timeoutMs = PROBE_TIMEOUT_MS, env) {
-  return new Promise((resolve) => {
-    const child = spawn(probe.command, probe.args, {
-      shell: false,
-      env: env ?? { ...process.env, PATH: augmentedPath() },
-      stdio: ["ignore", "ignore", "ignore"]
-    });
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      resolve(false);
-    }, timeoutMs);
-    timer.unref?.();
-    child.on("error", () => {
-      clearTimeout(timer);
-      resolve(false);
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve(code === 0);
-    });
-  });
-}
-function createInactivityWatchdog(options) {
-  let timer = null;
-  let stopped = false;
-  let probing = false;
-  let touchedWhileProbing = false;
-  const arm = () => {
-    if (stopped) return;
-    timer = setTimeout(fire, options.inactivityMs);
-    timer.unref?.();
-  };
-  const settleProbe = (alive) => {
-    probing = false;
-    if (stopped) return;
-    if (alive || touchedWhileProbing) {
-      arm();
-      return;
-    }
-    options.onDead();
-  };
-  const fire = () => {
-    probing = true;
-    touchedWhileProbing = false;
-    void options.probe().then(settleProbe, () => settleProbe(false));
-  };
-  arm();
-  return {
-    touch() {
-      if (stopped) return;
-      if (probing) {
-        touchedWhileProbing = true;
-        return;
-      }
-      if (timer) clearTimeout(timer);
-      arm();
-    },
-    stop() {
-      stopped = true;
-      if (timer) clearTimeout(timer);
-    }
-  };
-}
-function createLineSplitter(onLine) {
-  let pending = "";
-  const decoder = new StringDecoder("utf8");
-  return {
-    push(chunk) {
-      pending += typeof chunk === "string" ? chunk : decoder.write(chunk);
-      let newline;
-      while ((newline = pending.indexOf("\n")) !== -1) {
-        const line = pending.slice(0, newline);
-        pending = pending.slice(newline + 1);
-        onLine(line);
-      }
-    },
-    flush() {
-      pending += decoder.end();
-      if (pending) onLine(pending);
-      pending = "";
-    }
-  };
-}
-function createGateInterceptor(options) {
-  const actWithinMs = options.actWithinMs ?? CONTROL_ACT_WITHIN_MS;
-  let queue = Promise.resolve();
-  return (line) => {
-    const arrivedAt = Date.now();
-    queue = queue.then(async () => {
-      let frame = null;
-      try {
-        frame = JSON.parse(line);
-      } catch {
-      }
-      if (!frame || frame.method !== "tools/call") {
-        options.forward(line);
-        return;
-      }
-      const state = await options.check().catch(() => ({ held: true, helpOpen: false, blockedReason: CONTROL_UNCONFIRMED }));
-      if (!state.held && Date.now() - arrivedAt <= actWithinMs) {
-        options.forward(line);
-        return;
-      }
-      options.refuse(
-        JSON.stringify({
-          jsonrpc: "2.0",
-          id: frame.id ?? null,
-          result: { content: [{ type: "text", text: state.held ? controlRefusal(state) : CONTROL_WAITED }], isError: true }
-        })
-      );
-    });
-    return queue;
-  };
-}
-function createMcpBridgeInterceptor(options) {
-  const afterPing = options.gate ? createGateInterceptor({ check: options.gate.check, forward: options.forward, refuse: options.answer }) : (line) => {
-    options.forward(line);
-  };
-  return (line) => {
-    let frame = null;
-    try {
-      frame = JSON.parse(line);
-    } catch {
-    }
-    if (frame && frame.method === "ping") {
-      if (frame.id !== void 0) {
-        options.answer(JSON.stringify({ jsonrpc: "2.0", id: frame.id, result: {} }));
-      }
-      return;
-    }
-    return afterPing(line);
-  };
-}
-function runMcpBridge(options) {
-  const env = options.env ?? { ...process.env, PATH: augmentedPath() };
-  const { command: command2, args: args2 } = resolveCliSpawn(options.command, options.args, env);
-  const child = spawn(command2, args2, {
-    shell: false,
-    env,
-    stdio: ["pipe", "pipe", "pipe"]
-  });
-  child.stdin.on("error", () => {
-  });
-  child.stderr.pipe(process.stderr);
-  const client = options.gate ? createControlClient({ url: options.gate.url, token: options.gate.token }) : null;
-  const answer = (line) => process.stdout.write(line + "\n");
-  const forward = (line) => child.stdin.write(line + "\n");
-  const intercept = createMcpBridgeInterceptor({
-    answer,
-    forward,
-    ...client ? { gate: { check: () => client.state(true) } } : {}
-  });
-  const toolLists = createToolListNormalizer(toolSchemaProfileFromEnv(), (line) => process.stderr.write(`${options.label}: ${line}
-`));
-  let pendingInput = Promise.resolve();
-  const inbound = createLineSplitter((line) => {
-    toolLists.observeRequest(line);
-    const completion = intercept(line);
-    if (completion) pendingInput = completion;
-  });
-  const onStdin = (chunk) => inbound.push(chunk);
-  process.stdin.on("data", onStdin);
-  process.stdin.on("end", () => {
-    inbound.flush();
-    void pendingInput.finally(() => child.stdin.end());
-  });
-  const outbound = createLineSplitter((line) => process.stdout.write(textOnlyErrorResultLine(toolLists.rewriteResponse(line)) + "\n"));
-  child.stdout.on("data", (chunk) => outbound.push(chunk));
-  child.stdout.on("end", () => outbound.flush());
-  const detach = () => {
-    process.stdin.off("data", onStdin);
-    process.stdin.pause();
-  };
-  let watchdog = null;
-  if (options.liveness) {
-    const liveness = options.liveness;
-    watchdog = createInactivityWatchdog({
-      inactivityMs: BRIDGE_INACTIVITY_MS,
-      probe: () => runLivenessProbe(liveness, PROBE_TIMEOUT_MS, options.env),
-      onDead: () => {
-        process.stderr.write(
-          `${options.label} transport went silent and stopped answering liveness probes; ending the bridge
-`
-        );
-        process.exitCode = 1;
-        detach();
-        child.kill("SIGKILL");
-        const failsafe = setTimeout(() => process.exit(1), 2e3);
-        failsafe.unref?.();
-      }
-    });
-    const touch = () => watchdog?.touch();
-    process.stdin.on("data", touch);
-    child.stdout.on("data", touch);
-    child.stderr.on("data", touch);
-  }
-  child.on("error", (error) => {
-    process.stderr.write(`could not connect to ${options.label}: ${error.message}
-`);
-    process.exitCode = 1;
-    watchdog?.stop();
-    detach();
-  });
-  child.on("close", (code, signal) => {
-    if (signal) process.stderr.write(`${options.label} connection ended with ${signal}
-`);
-    process.exitCode = process.exitCode ?? code ?? 1;
-    watchdog?.stop();
-    detach();
-  });
-  for (const signal of ["SIGTERM", "SIGINT"]) {
-    process.on(signal, () => child.kill(signal));
-  }
-}
-
-// server/local-computer-proxy.ts
-var {
-  OMB_CUA_COMMAND: command,
-  OMB_CUA_ARGS: encodedArgs,
-  OMB_CONTROL_URL: url,
-  OMB_CONTROL_TOKEN: token,
-  ...childEnv
-} = process.env;
-var args;
-try {
-  const parsed = JSON.parse(encodedArgs ?? "");
-  const endpoint = new URL(url ?? "");
-  if (!command?.trim() || command.includes("\0") || !Array.isArray(parsed) || !parsed.every((arg) => typeof arg === "string" && !arg.includes("\0")) || !token || !["http:", "https:"].includes(endpoint.protocol) || !["127.0.0.1", "localhost", "[::1]"].includes(endpoint.hostname) || endpoint.username || endpoint.password) {
-    throw new Error("invalid connection");
-  }
-  args = parsed;
-} catch {
-  process.stderr.write("invalid local computer proxy connection\n");
-  process.exit(2);
-}
-runMcpBridge({
-  command,
-  args,
-  env: { ...childEnv, PATH: augmentedPath() },
-  label: "Local Cua Driver",
-  gate: { url, token }
-});
+`:"";fitted.push({...tool,description:description+shortenedToolNote(profile.provider),inputSchema:fit.schema})}return fitted}function createToolListNormalizer(profile,log){let pending=new Set,idKey=id=>`${typeof id}:${String(id)}`;return{observeRequest(line){let frame;try{frame=JSON.parse(line)}catch{return}isObject3(frame)&&frame.method==="tools/list"&&(typeof frame.id=="number"||typeof frame.id=="string")&&pending.add(idKey(frame.id))},rewriteResponse(line){if(pending.size===0)return line;let frame;try{frame=JSON.parse(line)}catch{return line}if(!isObject3(frame)||"method"in frame||!pending.delete(idKey(frame.id))||
+!isObject3(frame.result)||!Array.isArray(frame.result.tools))return line;let listed=frame.result.tools,tools=profile?fitToolList(listed,profile,log):listed.map(tool=>{if(!isObject3(tool))return tool;let inputSchema=providerSafeInputSchema(tool.inputSchema);return inputSchema===tool.inputSchema?tool:{...tool,inputSchema}});return tools.length!==listed.length||tools.some((tool,index)=>tool!==listed[index])?JSON.stringify({...frame,result:{...frame.result,tools}}):line}}}var isRec=value=>typeof value=="object"&&value!==null&&!Array.isArray(value);function pick(source,keys,types){let out={};for(let key of keys)typeof source[key]===types[key]&&(out[key]=source[key]);return out}var ELEMENT_TYPES={element_index:"number",element_token:"string",role:"string",label:"string",parent_index:"number",depth:"number"},APP_TYPES={pid:"number",name:"string",bundle_id:"string",running:"boolean"},WINDOW_TYPES={window_id:"number",pid:"number",title:"string",app_name:"string"},TOP_TYPES={
+pid:"number",window_id:"number",bundle_id:"string",name:"string",app_name:"string",window_title:"string"};function slimList(value,types,required,max=1/0,mark){if(!Array.isArray(value))return;let items=[];for(let item of value){if(items.length>=max)break;if(!isRec(item))continue;let slim=pick(item,Object.keys(types),types);mark?.(item,slim),required.every(key=>key in slim)&&items.push(slim)}return items}var markValueRead=(raw,slim)=>{typeof raw.value=="string"&&(slim.value_read=!0)},COUNTS=["elem\
+ent_count","total_element_count","returned_element_count","filtered_element_count"],hasText=value=>typeof value=="string"&&value.trim()!=="",countFits=(count,returned)=>count==null||typeof count=="number"&&count<=returned;function wholeTree(state){let returned=Array.isArray(state.elements)?state.elements.length:0;return state.elements_complete===!0&&state.truncated!==!0&&!hasText(state.truncation_reason)&&COUNTS.every(key=>countFits(state[key],returned))}var treeDegraded=state=>state.degraded===
+!0||hasText(state.degraded_reason);function slimStructured(raw){let out=pick(raw,Object.keys(TOP_TYPES),TOP_TYPES),elements=slimList(raw.elements,ELEMENT_TYPES,["element_index","role","depth"],1500,markValueRead),apps=slimList(raw.apps,APP_TYPES,["pid","name"]),windows=slimList(raw.windows,WINDOW_TYPES,["window_id","title"]);if(elements&&(out.elements=elements),elements&&elements.length===raw.elements.length&&wholeTree(raw)&&!treeDegraded(raw)&&(out.elements_complete=!0),apps&&(out.apps=apps),windows&&
+(out.windows=windows),isRec(raw.refusal)){let refusal=pick(raw.refusal,["code","message"],{code:"string",message:"string"});out.refusal=refusal}return out}function slimResponse(frame){if(!isRec(frame))return{isError:!0,rpcError:!0};if(frame.error!==void 0)return{isError:!0,rpcError:!0};let result=isRec(frame.result)?frame.result:{},slim={isError:result.isError===!0};return isRec(result.structuredContent)&&(slim.structured=slimStructured(result.structuredContent)),slim}var COMPUTER_JOURNAL_PATH="/api/internal/computer/journal";function journalUrl(controlUrl){return new URL(COMPUTER_JOURNAL_PATH,controlUrl).href}function postJournal(url2,token2,fetchImpl=fetch){return(entry,signal)=>fetchImpl(url2,{method:"POST",headers:{authorization:`Bearer ${token2}`,"content-type":"application/json"},body:JSON.stringify(entry),signal}).then(response=>response.body?.cancel())}function parse(line){try{let value=JSON.parse(line);return typeof value=="object"&&value!==null&&!Array.
+isArray(value)?value:null}catch{return null}}function createJournalTap(options){let timeoutMs=options.timeoutMs??1e3,pending=new Map;return{leaveOut(id){(typeof id=="string"||typeof id=="number")&&pending.delete(id)},request(line){let frame=parse(line);if(!frame||frame.method!=="tools/call"||typeof frame.id!="string"&&typeof frame.id!="number")return;let params=frame.params;if(typeof params?.name!="string")return;let args2=params.arguments;pending.set(frame.id,{tool:params.name,arguments:typeof args2==
+"object"&&args2!==null&&!Array.isArray(args2)?args2:{}})},async response(line){let frame=parse(line);if(!frame||frame.method!==void 0||typeof frame.id!="string"&&typeof frame.id!="number")return;let call=pending.get(frame.id);if(!call)return;pending.delete(frame.id);let controller=new AbortController,timer;try{let posted=Promise.resolve(options.post({...call,result:slimResponse(frame)},controller.signal)),expired=new Promise(resolve=>{timer=setTimeout(()=>{controller.abort(),resolve()},timeoutMs)});
+await Promise.race([posted,expired])}catch{}finally{clearTimeout(timer)}}}}var BRIDGE_INACTIVITY_MS=45e3,PROBE_TIMEOUT_MS=1e4;function runLivenessProbe(probe,timeoutMs=PROBE_TIMEOUT_MS,env){return new Promise(resolve=>{let child=spawn(probe.command,probe.args,{shell:!1,env:env??{...process.env,PATH:augmentedPath()},stdio:["ignore","ignore","ignore"]}),timer=setTimeout(()=>{child.kill("SIGKILL"),resolve(!1)},timeoutMs);timer.unref?.(),child.on("error",()=>{clearTimeout(timer),resolve(!1)}),child.on("close",code=>{clearTimeout(timer),resolve(code===0)})})}function createInactivityWatchdog(options){
+let timer=null,stopped=!1,probing=!1,touchedWhileProbing=!1,arm=()=>{stopped||(timer=setTimeout(fire,options.inactivityMs),timer.unref?.())},settleProbe=alive=>{if(probing=!1,!stopped){if(alive||touchedWhileProbing){arm();return}options.onDead()}},fire=()=>{probing=!0,touchedWhileProbing=!1,options.probe().then(settleProbe,()=>settleProbe(!1))};return arm(),{touch(){if(!stopped){if(probing){touchedWhileProbing=!0;return}timer&&clearTimeout(timer),arm()}},stop(){stopped=!0,timer&&clearTimeout(timer)}}}
+function createLineSplitter(onLine){let pending="",decoder=new StringDecoder("utf8");return{push(chunk){pending+=typeof chunk=="string"?chunk:decoder.write(chunk);let newline;for(;(newline=pending.indexOf(`
+`))!==-1;){let line=pending.slice(0,newline);pending=pending.slice(newline+1),onLine(line)}},flush(){pending+=decoder.end(),pending&&onLine(pending),pending=""}}}function createGateInterceptor(options){let actWithinMs=options.actWithinMs??5e3,queue=Promise.resolve();return line=>{let arrivedAt=Date.now();return queue=queue.then(async()=>{let frame=null;try{frame=JSON.parse(line)}catch{}if(!frame||frame.method!=="tools/call"){await options.forward(line);return}let state=await options.check(frame).
+catch(()=>({held:!0,helpOpen:!1,blockedReason:CONTROL_UNCONFIRMED}));if(!state.held&&Date.now()-arrivedAt<=actWithinMs){await options.forward(line);return}options.refuse(JSON.stringify({jsonrpc:"2.0",id:frame.id??null,result:{content:[{type:"text",text:state.held?controlRefusal(state):CONTROL_WAITED}],isError:!0}}))}),queue}}function createMcpBridgeInterceptor(options){let afterPing=options.gate?createGateInterceptor({check:options.gate.check,forward:options.forward,refuse:options.answer}):line=>options.
+forward(line);return line=>{let frame=null;try{frame=JSON.parse(line)}catch{}if(frame&&frame.method==="ping"){frame.id!==void 0&&options.answer(JSON.stringify({jsonrpc:"2.0",id:frame.id,result:{}}));return}return afterPing(line)}}function createReplyQueue(tap,write){let chain=Promise.resolve();return(raw,written)=>{if(!tap){write(written);return}chain=chain.then(()=>tap.response(raw)).catch(()=>{}).then(()=>write(written))}}var OWN_ID="omb-bridge-",SERVER_INFO_META="io.modelcontextprotocol/serve\
+rInfo";function isObject4(value){return!!value&&typeof value=="object"&&!Array.isArray(value)}function failed(text){return{content:[{type:"text",text}],isError:!0}}function relayableCall(line){let frame=null;try{frame=JSON.parse(line)}catch{return null}let params=frame?.method==="tools/call"&&frame.id!==void 0&&frame.id!==null?frame.params:null;return!isObject4(params)||typeof params.name!="string"?null:{id:frame.id,call:{name:params.name,arguments:isObject4(params.arguments)?params.arguments:{}},
+meta:params._meta}}function createChildCalls(write){let sequence=0,driverVersion,closed=!1,waiting=new Map;return{forCall(meta){return{call(name,args2){if(closed)return Promise.resolve(failed("Computer-control transport closed"));let id=`${OWN_ID}${++sequence}`;return new Promise(resolve=>{waiting.set(id,resolve),write(JSON.stringify({jsonrpc:"2.0",id,method:"tools/call",params:{name,arguments:args2,...meta===void 0?{}:{_meta:meta}}}))})},get driverVersion(){return driverVersion}}},take(line){let versioned=driverVersion===
+void 0&&line.includes("serverInfo"),ours=waiting.size>0&&line.includes(OWN_ID);if(!versioned&&!ours)return!1;let frame=null;try{frame=JSON.parse(line)}catch{return!1}let version=frame?.result?.serverInfo?.version??frame?.result?._meta?.[SERVER_INFO_META]?.version;versioned&&typeof version=="string"&&(driverVersion=version);let resolve=ours&&typeof frame?.id=="string"?waiting.get(frame.id):void 0;return resolve?(waiting.delete(frame.id),resolve(isObject4(frame.result)?frame.result:failed(String(frame.
+error?.message??"Computer control returned no result"))),!0):!1},close(){closed=!0;for(let resolve of waiting.values())resolve(failed("Computer-control transport closed"));waiting.clear()}}}function runMcpBridge(options){let env=options.env??{...process.env,PATH:augmentedPath()},{command:command2,args:args2}=resolveCliSpawn(options.command,options.args,env),child=spawn(command2,args2,{shell:!1,env,stdio:["pipe","pipe","pipe"]});child.stdin.on("error",()=>{}),child.stderr.pipe(process.stderr);let client=options.
+gate?createControlClient({url:options.gate.url,token:options.gate.token}):null,tap=options.journal?createJournalTap({post:postJournal(options.journal.url,options.journal.token)}):null,reply=createReplyQueue(tap,written=>process.stdout.write(written+`
+`)),answer=line=>reply(line,line),toolLists=createToolListNormalizer(toolSchemaProfileFromEnv(),line=>process.stderr.write(`${options.label}: ${line}
+`)),rewrite=options.rewriteResponse??(line=>line),respond=line=>reply(line,textOnlyErrorResultLine(rewrite(toolLists.rewriteResponse(line)))),children=createChildCalls(line=>child.stdin.write(line+`
+`)),send=async line=>{let frame=line.includes('"tools/call"')?relayableCall(line):null,relayed=frame&&options.relay?.(frame.call,children.forCall(frame.meta));if(!frame||!relayed){child.stdin.write(line+`
+`);return}tap?.leaveOut(frame.id);let result=await relayed.catch(error=>failed(error instanceof Error?error.message:String(error)));respond(JSON.stringify({jsonrpc:"2.0",id:frame.id,result}))},sending=Promise.resolve(),intercept=createMcpBridgeInterceptor({answer,forward:line=>{if(!options.relay){child.stdin.write(line+`
+`);return}return sending=sending.then(()=>send(line)).catch(()=>{}),sending},...client?{gate:{check:frame=>client.state(!0,options.gate?.describe?.(frame))}}:{}}),pendingInput=Promise.resolve(),inbound=createLineSplitter(line=>{toolLists.observeRequest(line),tap?.request(line);let completion=intercept(line);completion&&(pendingInput=completion)}),onStdin=chunk=>inbound.push(chunk);process.stdin.on("data",onStdin),process.stdin.on("end",()=>{inbound.flush(),pendingInput.finally(()=>child.stdin.end())});
+let outbound=createLineSplitter(line=>{children.take(line)||respond(line)});child.stdout.on("data",chunk=>outbound.push(chunk)),child.stdout.on("end",()=>outbound.flush());let detach=()=>{process.stdin.off("data",onStdin),process.stdin.pause()},watchdog=null;if(options.liveness){let liveness=options.liveness;watchdog=createInactivityWatchdog({inactivityMs:BRIDGE_INACTIVITY_MS,probe:()=>runLivenessProbe(liveness,PROBE_TIMEOUT_MS,options.env),onDead:()=>{process.stderr.write(`${options.label} tran\
+sport went silent and stopped answering liveness probes; ending the bridge
+`),process.exitCode=1,detach(),child.kill("SIGKILL"),setTimeout(()=>process.exit(1),2e3).unref?.()}});let touch=()=>watchdog?.touch();process.stdin.on("data",touch),child.stdout.on("data",touch),child.stderr.on("data",touch)}child.on("error",error=>{process.stderr.write(`could not connect to ${options.label}: ${error.message}
+`),process.exitCode=1,watchdog?.stop(),children.close(),detach()}),child.on("close",(code,signal)=>{signal&&process.stderr.write(`${options.label} connection ended with ${signal}
+`),process.exitCode=process.exitCode??code??1,watchdog?.stop(),children.close(),detach()});for(let signal of["SIGTERM","SIGINT"])process.on(signal,()=>child.kill(signal))}var PACED_FROM=[0,35,0],MAX_PACED_CHARACTERS=300,LEAKED_TAGS=new Set(["text","parameter","invoke","function_calls","function_call","tool_use","tool_call","antml:parameter","antml:invoke","antml:function_calls"]),asciiLower=value=>value.replace(/[A-Z]+/gu,letters=>letters.toLowerCase());function olderThanPacing(version){let parts=/^(\d+)\.(\d+)\.(\d+)/u.exec(typeof version=="string"?version:"")?.slice(1).map(Number);if(!parts)return!1;for(let[index,part]of parts.entries())if(part!==PACED_FROM[index])
+return part<PACED_FROM[index];return!1}var desktopScope=args2=>args2.scope==="desktop"&&args2.pid===void 0&&args2.window_id===void 0;function typesInOneBurst(platform2,driverVersion,name,args2){return platform2!=="win32"||name!=="type_text"||!olderThanPacing(driverVersion)||!args2||typeof args2!="object"||typeof args2.text!="string"?!1:desktopScope(args2)?!0:typeof args2.delivery_mode=="string"&&args2.delivery_mode.toLowerCase()==="foreground"&&Number.isSafeInteger(args2.pid)&&(args2.window_id!==
+void 0||args2.element_token===void 0)}function typingUnits(text){let units=[];for(let character of text)character===`
+`&&units.at(-1)==="\r"?units[units.length-1]=`\r
+`:units.push(character);return units}function opensTag(before,name){let lower=asciiLower(before),opener=`<${name}`;for(let at=lower.indexOf(opener);at!==-1;at=lower.indexOf(opener,at+opener.length)){let next=lower[at+opener.length];if(next===void 0||next===">"||/\s/u.test(next))return!0}return!1}function withoutLeakedToolTags(text){let trimmed=text.trimEnd(),end=trimmed.length;for(;;){let head=trimmed.slice(0,end).trimEnd();end=head.length;let open=head.lastIndexOf("</");if(!head.endsWith(">")||
+open===-1)break;let name=head.slice(open+2,-1);if(!name||/\s/u.test(name)||!LEAKED_TAGS.has(asciiLower(name))||opensTag(head.slice(0,open),asciiLower(name)))break;end=open}return end===trimmed.length?text:trimmed.slice(0,end).trimEnd()}var failure=text=>({content:[{type:"text",text}],isError:!0});async function attempt(call,name,args2){try{let result=await call(name,args2);return result&&typeof result=="object"?result:failure(`${name} returned no result`)}catch(error){return failure(error instanceof
+Error?error.message:String(error))}}var SAID=new Set(["content","structuredContent","isError"]),envelope=result=>Object.fromEntries(Object.entries(result).filter(([key])=>!SAID.has(key))),handle=value=>typeof value=="string"&&/^0x[0-9a-f]+$/iu.test(value)?Number.parseInt(value,16):0;async function inFront(call,pid,window){let front=await attempt(call,"bring_to_front",{pid,...window===void 0?{}:{window_id:window}}),shown=front.isError?null:front.structuredContent;return{ok:!!shown,before:handle(shown?.
+previous_fg_hwnd),target:handle(shown?.target_hwnd)}}async function giveFrontBack(call,before,target){if(!before||before===target)return;let windows=(await attempt(call,"list_windows",{})).structuredContent?.windows,owner=Array.isArray(windows)?windows.find(entry=>entry?.window_id===before)?.pid:void 0;Number.isSafeInteger(owner)&&await attempt(call,"bring_to_front",{pid:owner,window_id:before})}var tooLong=count=>failure(`type_text was not performed: on this Windows computer, text typed in the \
+foreground goes in one character at a time so that each one lands, and one call types at most ${MAX_PACED_CHARACTERS} characters; this text has ${count}. Type it in parts of at most ${MAX_PACED_CHARACTERS} characters, one type_text call after another.`),typedOnly=(done,total)=>`Only the first ${done} of ${total} characters were typed; the rest were not sent.`,READ_AGAIN2="Read the field again with get_window_state before typing the rest.";async function typeOneCharacterAtATime(call,args2){let units=typingUnits(
+withoutLeakedToolTags(args2.text));if(units.length<2)return attempt(call,"type_text",args2);if(units.length>MAX_PACED_CHARACTERS)return tooLong(units.length);let desktop=desktopScope(args2),session=args2.session===void 0?{}:{session:args2.session},window=args2.window_id,giveBackTo=0,typed,stopped;for(let[index,unit]of units.entries()){if(!desktop){let front=await inFront(call,args2.pid,window);if(index===0)giveBackTo=front.before,window??=front.target||void 0;else if(!front.ok||front.before!==front.
+target){front.ok&&(giveBackTo=front.before),stopped={...envelope(typed),isError:!0,content:[{type:"text",text:`${typedOnly(index,units.length)} The window being typed into was no longer in front, so typing stopped; someone may be using this computer. ${READ_AGAIN2}`}]};break}}let later=desktop?{scope:"desktop",...session}:{pid:args2.pid,window_id:window,delivery_mode:args2.delivery_mode,...session},result=await attempt(call,"type_text",{...index===0?args2:later,text:unit});if(result.isError){stopped=
+index===0?result:{...result,content:[{type:"text",text:`${typedOnly(index,units.length)} Typing the next one failed. ${READ_AGAIN2} The failure:`},...Array.isArray(result.content)?result.content:[]]};break}typed=result}if(desktop||await giveFrontBack(call,giveBackTo,window),stopped)return stopped;let said=desktop?`Typed ${units.length} character(s) into the foreground application (scope:desktop), one at a time.`:`\u2705 Typed ${units.length} char(s) on pid ${args2.pid} via SendInput (delivery_mo\
+de:foreground), one character at a time.`;return{...typed,content:[{type:"text",text:said}]}}var BROWSERS={chrome:"Chrome","google chrome":"Chrome",chromium:"Chromium",safari:"Safari",firefox:"Firefox","mozilla firefox":"Firefox",edge:"Edge","microsoft edge":"Edge",msedge:"Edge",brave:"Brave","brave browser":"Brave",arc:"Arc",opera:"Opera",vivaldi:"Vivaldi"},BUNDLES={"com.google.chrome":"Chrome","com.google.chrome.beta":"Chrome","com.google.chrome.canary":"Chrome","org.chromium.chromium":"Chromium","com.apple.safari":"Safari","com.apple.safaritechnologypreview":"Safari","org.mozilla.fir\
+efox":"Firefox","com.microsoft.edgemac":"Edge","com.brave.browser":"Brave","company.thebrowser.browser":"Arc","com.operasoftware.opera":"Opera","com.vivaldi.vivaldi":"Vivaldi"};function cleanAppName(value){if(typeof value!="string")return;let name=value.trim().replace(/\.(?:app|exe)$/i,"");if(!(!name||name.length>28||name.split(" ").length>3||!/^[\p{L}\p{N}](?:[\p{L}\p{N}&'+-]| (?! ))*$/u.test(name)))return BROWSERS[name.toLowerCase()]??name}function cleanSiteName(value){if(typeof value!="string"||
+value.length>253)return;let host=value.trim().toLowerCase().replace(/^www\./,"");return/^(?=.{1,100}$)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/.test(host)?host:void 0}function siteOf(url2){if(typeof url2=="string")try{let parsed=new URL(url2);return parsed.protocol==="http:"||parsed.protocol==="https:"?cleanSiteName(parsed.hostname):void 0}catch{return}}function appOfBundle(bundle){if(typeof bundle!="string")return;let known=BUNDLES[bundle.trim().toLowerCase()];if(known)
+return known;let last=bundle.trim().split(".").pop()??"";return/^[A-Za-z][A-Za-z0-9]{1,30}$/.test(last)?cleanAppName(last.charAt(0).toUpperCase()+last.slice(1)):void 0}function describeComputerCall(frame){let params=frame?.params,args2=params?.arguments;if(!args2||typeof args2!="object")return{};let app=params?.name==="launch_app"?appOfBundle(args2.bundle_id)??cleanAppName(args2.name):void 0,site=(Array.isArray(args2.urls)?args2.urls:[]).map(siteOf).find(Boolean)??siteOf(args2.url);return{...app?
+{app}:{},...site?{site}:{}}}var AFTER_THE_CLICK=/^foreground_unavailable: .* was not foreground after the click\b/u,CLICK_TOOLS=new Set(["click","double_click","right_click"]),CLICK_SENT_UNCONFIRMED="The click was sent. Afterwards a different window was in front, which is what happens when a click picks a menu item (the menu closes) or opens or closes a window, so where it landed is not confirmed. Do not click again until you have checked the result with get_window_state.";function isObject5(value){return!!value&&typeof value==
+"object"&&!Array.isArray(value)}function unconfirmedClickResult(result){return!isObject5(result)||result.isError!==!0||!Array.isArray(result.content)||!result.content.some(part=>isObject5(part)&&part.type==="text"&&typeof part.text=="string"&&AFTER_THE_CLICK.test(part.text))?null:{...Object.fromEntries(Object.entries(result).filter(([key])=>!["content","structuredContent","isError"].includes(key))),content:[{type:"text",text:CLICK_SENT_UNCONFIRMED}],structuredContent:{effect:"unverifiable",route:"\
+global_input",delivery:{mode:"foreground"}}}}var PLAIN_WORDS="When you tell the person about any of this, use plain words: say what you could not do and what they can do, and never mention DevTools, CDP, debugging ports, profiles, grants, binding, attaching, endpoints or drivers.",OWN_PROFILE_UNAVAILABLE="Computer control on this computer cannot attach to the person's own signed-in browser profile, and nothing the person can turn on changes that: do not retry strategy existing_profile, and never ask them to grant it or to start anything wi\
+th a flag. For work on a website, use your own browser: if select_computer offers browser, select it and end your turn. The request continues there, in the person's own Chrome when this bot's browser profile is My Chrome, and fill_login can sign in there with the person's saved logins, 1Password included. With no browser of your own, use a cloud computer if select_computer offers one, or a connected app. Only when the task needs the person's own signed-in session and nothing else works, use thei\
+r screen: launch_app with urls opens the page in their own browser; read it with get_window_state and act with click, type_text and press_key, and call request_sign_in when the site needs them to sign in. "+PLAIN_WORDS,REFUSAL_CODE="browser_consent_required";function isObject6(value){return!!value&&typeof value=="object"&&!Array.isArray(value)}function refusesOwnProfile(result){let structured=result.structuredContent;if(!isObject6(structured)||!isObject6(structured.refusal))return!1;let{code,message}=structured.
+refusal;return code===REFUSAL_CODE&&typeof message=="string"&&message.includes("existing-profile")}function localComputerResultLine(line){if(!line.includes(REFUSAL_CODE))return line;let frame;try{frame=JSON.parse(line)}catch{return line}if(!isObject6(frame)||!isObject6(frame.result)||!Array.isArray(frame.result.content)||!refusesOwnProfile(frame.result))return line;let content=[...frame.result.content,{type:"text",text:OWN_PROFILE_UNAVAILABLE}];return JSON.stringify({...frame,result:{...frame.result,
+content}})}function localComputerCallQuery(frame){let{app,site}=describeComputerCall(frame);return{...app?{app}:{},...site?{site}:{}}}function localComputerRelay(platform2){return(call,child)=>platform2!=="win32"?null:typesInOneBurst(platform2,child.driverVersion,call.name,call.arguments)?typeOneCharacterAtATime(child.call,call.arguments):CLICK_TOOLS.has(call.name)?child.call(call.name,call.arguments).then(result=>unconfirmedClickResult(result)??result):null}var{OMB_CUA_COMMAND:command,OMB_CUA_ARGS:encodedArgs,OMB_CUA_PLATFORM:platform,OMB_CONTROL_URL:url,OMB_CONTROL_TOKEN:token,OMB_COMPUTER_JOURNAL:journal,...childEnv}=process.env,args;try{let parsed=JSON.parse(encodedArgs??""),endpoint=new URL(url??"");if(!command?.trim()||command.includes("\0")||!Array.isArray(parsed)||!parsed.every(arg=>typeof arg=="string"&&!arg.includes("\0"))||!token||!["http:","https:"].includes(endpoint.protocol)||!["127.0.0.1","localhost","[::1]"].includes(endpoint.hostname)||
+endpoint.username||endpoint.password)throw new Error("invalid connection");args=parsed}catch{process.stderr.write(`invalid local computer proxy connection
+`),process.exit(2)}runMcpBridge({command,args,env:{...childEnv,PATH:augmentedPath()},label:"Local Cua Driver",gate:{url,token,describe:localComputerCallQuery},...journal==="1"?{journal:{url:journalUrl(url),token}}:{},rewriteResponse:localComputerResultLine,relay:localComputerRelay(platform??process.platform)});

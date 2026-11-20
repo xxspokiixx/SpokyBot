@@ -1,0 +1,38 @@
+// config.json: a server that cannot read it starts on defaults, without its keys and connections. A dated copy is the
+// settings' own way back (config-backup.ts keeps one per save); the doctor only says so, and never rewrites the file.
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+export function settingsFileCheck() {
+    return {
+        id: "settings-file",
+        title: "Settings file",
+        looksAt: "config.json",
+        check(ctx) {
+            const file = join(ctx.dataDir, "config.json");
+            let text;
+            try {
+                text = readFileSync(file, "utf8");
+            }
+            catch (error) {
+                if (error.code === "ENOENT")
+                    return { status: "ok", summary: "Not there yet." };
+                return { status: "problem", summary: "config.json cannot be read by this user.", instruction: `Give the server's user the file back (chown <user> ${file}).` };
+            }
+            try {
+                const parsed = JSON.parse(text.replace(/^\uFEFF/, ""));
+                if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+                    return { status: "ok", summary: "Reads." };
+            }
+            catch { }
+            let copies = 0;
+            try {
+                copies = readdirSync(ctx.dataDir).filter((name) => /^config\.json\.bak\.\d{8}-\d{6}(?:-\d+)?$/.test(name)).length;
+            }
+            catch { }
+            return { status: "problem", summary: "config.json cannot be understood, so the server runs on default settings, without its keys.",
+                instruction: copies
+                    ? `Stop the server, then put back one of the ${copies} dated cop${copies === 1 ? "y" : "ies"} of config.json beside it. The file it replaces is kept too.`
+                    : "Stop the server and put back config.json from a backup, or the data folder from a workspace backup." };
+        },
+    };
+}

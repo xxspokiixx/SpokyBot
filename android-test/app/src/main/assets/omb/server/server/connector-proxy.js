@@ -3,11 +3,15 @@
 import readline from "node:readline";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { CONNECTOR_ALLOWED_TOOLS_ENV, CONNECTOR_SERVICE_SLUGS_ENV, filterToolsListFrame, parseConnectorAllowedToolsEnv, parseConnectorServiceSlugsEnv, } from "./connector-advertisement.js";
+import { CONNECTOR_ALLOWED_TOOLS_ENV, CONNECTOR_SERVICE_SLUGS_ENV, filterToolsListFrame, parseConnectorAllowedToolsEnv, parseConnectorServiceSlugsEnv, withAuthConfigParameter, } from "./connector-advertisement.js";
+import { APP_TOOL_NAMES_ENV, APP_TOOLS_ENV, appToolAnswer, appToolCall, appToolEntries, parseAppToolsEnv } from "./connector-app-tools.js";
+import { ARGUMENT_REFUSAL, argumentRefusalNote, fitArguments, fittedArgumentsNote } from "./connector-arguments.js";
+import { annotateFailedCall } from "./connector-scope-hint.js";
 import { withSignedOutHint } from "./connector-signed-out-hint.js";
 import { AUTH_CONFIG_ID } from "../shared/connector-availability.js";
 import { fitToolListResult } from "./mcp-tool-schema.js";
 import { toolSchemaProfileFromEnv } from "./tool-schema-profile.js";
+import { capToolListResult, toolLimitFromEnv } from "./tool-count-limit.js";
 const UPSTREAM = process.env.OMB_CONNECTOR_UPSTREAM_URL ?? "";
 const HARNESS = process.env.OMB_HARNESS_URL ?? "http://127.0.0.1:8799";
 const BOT_ID = process.env.OMB_BOT_ID ?? "";
@@ -16,6 +20,9 @@ const TOKEN = process.env.OMB_CONNECTOR_TOKEN ?? process.env.OMB_COMMS_TOKEN ?? 
 const ALLOWED_TOOLS = parseConnectorAllowedToolsEnv(process.env[CONNECTOR_ALLOWED_TOOLS_ENV]);
 const SERVICE_SLUGS = parseConnectorServiceSlugsEnv(process.env[CONNECTOR_SERVICE_SLUGS_ENV]);
 const SCHEMA_PROFILE = toolSchemaProfileFromEnv(process.env);
+const TOOL_LIMIT = toolLimitFromEnv(process.env);
+const APP_TOOLS = parseAppToolsEnv(process.env[APP_TOOLS_ENV]);
+const APP_TOOL_NAMES = process.env[APP_TOOL_NAMES_ENV] === "dotted" ? "dotted" : "plain";
 const MAX_RESPONSE_BYTES = 20 * 1024 * 1024;
 const INITIALIZE_RELAY_TIMEOUT_MS = 1_000;
 const RELAY_TIMEOUT_MS = 10 * 60_000;
@@ -33,6 +40,10 @@ function parsedHeaders() {
 }
 const upstreamHeaders = parsedHeaders();
 let upstreamSessionId = "";
+/** Each listed tool's input schema, as the connector service listed it: what a call's arguments are fitted to. */
+const SCHEMAS = new Map();
+/** The connected apps this bot may use, named when a refused call might read as "no such tool". */
+const USABLE_APPS = ALLOWED_TOOLS ? SERVICE_SLUGS.filter((slug) => Object.hasOwn(ALLOWED_TOOLS, slug)) : SERVICE_SLUGS;
 const send = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 function textResult(id, text, isError = false) {
     return { jsonrpc: "2.0", id, result: { content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) } };
@@ -180,6 +191,7 @@ function connectorAdds(args) {
     });
     return { requests: checked, badAuthConfig };
 }
+/** Resolves to the harness's line on which auth config each toolkit connects with, when it names one. */
 async function showConnectorCards(items) {
     const response = await fetch(`${HARNESS}/api/internal/connectors/request`, {
         method: "POST",
@@ -187,17 +199,52 @@ async function showConnectorCards(items) {
         body: JSON.stringify({ botId: BOT_ID, threadId: THREAD_ID, items, resumeKey: randomUUID() }),
         signal: AbortSignal.timeout(30_000),
     });
-    if (!response.ok) {
-        const body = (await response.json().catch(() => ({})));
+    const body = (await response.json().catch(() => ({})));
+    if (!response.ok)
         throw new Error(String(body.error ?? `could not show connection card (HTTP ${response.status})`));
+    return typeof body.authConfigNote === "string" && body.authConfigNote ? ` ${body.authConfigNote}` : "";
+}
+/** The upstream list with the app tools after it, unless it already has one by that name. */
+function withAppTools(frame) {
+    const result = frame.result;
+    if (!APP_TOOLS.length || !result || !Array.isArray(result.tools))
+        return frame;
+    const listed = new Set(result.tools.map((tool) => tool?.name));
+    const added = appToolEntries(APP_TOOLS, APP_TOOL_NAMES).filter((tool) => !listed.has(tool.name));
+    return { ...frame, result: { ...result, tools: [...result.tools, ...added] } };
+}
+function rememberSchemas(frame) {
+    const tools = frame.result?.tools;
+    if (Array.isArray(tools)) {
+        for (const tool of tools) {
+            const { name, inputSchema } = (tool ?? {});
+            if (typeof name === "string" && inputSchema !== undefined)
+                SCHEMAS.set(name, inputSchema);
+        }
     }
+    return frame;
+}
+/** A call refused over its arguments says how to call again; one whose arguments were fitted says how they were read. */
+function withArgumentNotes(name, response, changed) {
+    const error = response.error;
+    if (error && typeof error.message === "string" && ARGUMENT_REFUSAL.test(error.message)) {
+        return textResult(response.id, `${error.message}\n\n${argumentRefusalNote(name, SCHEMAS.get(name), USABLE_APPS)}`, true);
+    }
+    if (annotateFailedCall(response, ARGUMENT_REFUSAL, (tools) => argumentRefusalNote(tools[0] ?? name, SCHEMAS.get(tools[0] ?? name), USABLE_APPS), [name]))
+        return response;
+    const result = response.result;
+    if (changed.length && result && result.isError !== true && Array.isArray(result.content))
+        result.content.push({ type: "text", text: fittedArgumentsNote(name, changed) });
+    return response;
 }
 function fittedList(frame) {
-    if (!SCHEMA_PROFILE || !("result" in frame))
+    if ((!SCHEMA_PROFILE && TOOL_LIMIT === undefined) || !("result" in frame))
         return frame;
-    return { ...frame, result: fitToolListResult(frame.result, SCHEMA_PROFILE, (line) => process.stderr.write(`connector-proxy: ${line}\n`)) };
+    const log = (line) => process.stderr.write(`connector-proxy: ${line}\n`);
+    return { ...frame, result: capToolListResult(fitToolListResult(frame.result, SCHEMA_PROFILE, log), TOOL_LIMIT, log) };
 }
-async function handle(message) {
+async function handle(received) {
+    let message = received;
     const id = message.id;
     const method = String(message.method ?? "");
     // OpenCode and other MCP clients mark a stdio server failed unless initialize returns capabilities and serverInfo.
@@ -221,9 +268,15 @@ async function handle(message) {
         }
         return;
     }
+    let changed = [];
     if (method === "tools/call") {
+        const given = (message.params ?? {});
+        const name = String(given.name ?? "");
+        const fitted = SCHEMAS.has(name) ? fitArguments(given.arguments, SCHEMAS.get(name)) : { args: given.arguments, changed: [] };
+        changed = fitted.changed;
+        if (changed.length)
+            message = { ...message, params: { ...given, arguments: fitted.args } };
         const params = (message.params ?? {});
-        const name = String(params.name ?? "");
         const { requests, badAuthConfig } = /MANAGE_CONNECTIONS$/i.test(name)
             ? connectorAdds(params.arguments)
             : { requests: [], badAuthConfig: false };
@@ -232,13 +285,21 @@ async function handle(message) {
             return;
         }
         if (requests.length) {
-            await showConnectorCards(requests);
+            const authConfigNote = await showConnectorCards(requests);
             const labels = requests.map((r) => (r.alias ? `${r.slug} (${r.alias})` : r.slug)).join(", ");
-            send(textResult(id, `SpokyBot showed the user a secure connection card for ${labels}. End this turn now. The app will continue the task automatically after the connection finishes.`));
+            send(textResult(id, `SpokyBot showed the user a secure connection card for ${labels}.${authConfigNote} End this turn now. The app will continue the task automatically after the connection finishes.`));
             return;
         }
         if (/WAIT_FOR_CONNECTIONS$/i.test(name)) {
             send(textResult(id, "SpokyBot is handling connection completion and will continue the task automatically."));
+            return;
+        }
+        const app = appToolCall(name, params.arguments);
+        if (app) {
+            const call = app.frame(id);
+            const response = await relay(call);
+            if (response && id !== undefined)
+                send(appToolAnswer(app.slug, withSignedOutHint(call, response, SERVICE_SLUGS)));
             return;
         }
     }
@@ -248,8 +309,9 @@ async function handle(message) {
             ? await relay(message).catch(() => delay(TOOLS_LIST_RETRY_MS).then(() => relay(message)))
             : await relay(message);
         if (response && id !== undefined) {
-            send(method === "tools/list" ? fittedList(ALLOWED_TOOLS ? filterToolsListFrame(response, ALLOWED_TOOLS, SERVICE_SLUGS) : response)
-                : method === "tools/call" ? withSignedOutHint(message, response, SERVICE_SLUGS) : response);
+            const name = String(message.params?.name ?? "");
+            send(method === "tools/list" ? fittedList(rememberSchemas(withAppTools(withAuthConfigParameter(ALLOWED_TOOLS ? filterToolsListFrame(response, ALLOWED_TOOLS, SERVICE_SLUGS) : response))))
+                : method === "tools/call" ? withArgumentNotes(name, withSignedOutHint(message, response, SERVICE_SLUGS), changed) : response);
         }
     }
     catch (error) {

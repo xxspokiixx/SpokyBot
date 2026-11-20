@@ -11,6 +11,12 @@ export function placeOffered(place: Place, config: { cloudHome?: boolean } | nul
   return !config?.cloudHome || cloudHomeOffersPlace(place);
 }
 
+/** A Local VM needs a container runtime, which the phone shell never has: there, a bot's own
+ * Linux environment behind "This computer" is the whole story. */
+export function localVmOffered(platform: string | undefined): boolean {
+  return platform !== "android";
+}
+
 export function effectivePlace(bot: Pick<Bot, "computer">, task?: Pick<Task, "surface"> | null): EffectivePlace {
   if (bot.computer === "off") return "off";
   return task?.surface ?? bot.computer ?? "auto";

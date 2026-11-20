@@ -3,6 +3,7 @@
 // without it.
 import { answerAsleep } from "../cloud-power.js";
 import { requestSource } from "../request-auth.js";
+import { desktopPresence } from "../computer-asks.js";
 import { responseGone, sharedComputerRegistration } from "../shared-computers.js";
 import { PASS } from "./table.js";
 const LINK = /^\/api\/shared-computers\/([\w-]+)\/link$/;
@@ -54,6 +55,23 @@ export function createSharedComputerRoutes(deps) {
                 return json(res, 403, { error: "Only your own computers can be shared with the Cloud. On this computer, choose Open the Cloud in Settings → SpokyBot Cloud first." });
             deps.computers.register(registration, { session: auth.session.id, person: deps.cloudHomeLender ?? deps.personKey(auth.session) }, secret);
             return json(res, 200, { ok: true });
+        }
+        if (path === "/api/shared-computers/asks") {
+            if (!deps.asks || !deps.cloudHomeLender)
+                return json(res, 404, { error: "not found" });
+            if (!auth.scopes.includes("admin"))
+                return json(res, 403, { error: "Only your own computers can answer the Cloud's bots." });
+            const parsed = desktopPresence.safeParse(body);
+            if (!parsed.success)
+                return json(res, 400, { error: "Invalid computer state" });
+            const power = deps.power();
+            if (power?.sleeping())
+                return answerAsleep(res, json);
+            const { heard, answers, ...state } = parsed.data;
+            const news = await deps.asks.present(state, answers, deps.answerer?.(auth) ?? { kind: "worker" }, heard, power ? AbortSignal.any([responseGone(res), power.sleepSignal()]) : responseGone(res));
+            if (power?.sleeping())
+                return answerAsleep(res, json);
+            return json(res, 200, news);
         }
         const route = /^\/api\/shared-computers\/([\w-]+)\/(poll|lease|result|disconnect)$/.exec(path);
         if (!route)

@@ -1,6 +1,8 @@
-// One generated thread title: the engine's one-shot text call, given 10 seconds, its reply cleaned to a title or null.
 import { titleFromLlm } from "./store.js";
 import { threadTitlePrompt } from "./thread-title.js";
+export function llmThreadTitlesEnabled(cfg) {
+    return cfg.features?.llmThreadTitles === true;
+}
 export async function generateThreadTitle(provider, text, source = "first-message") {
     const prompt = threadTitlePrompt(text, source);
     const expiry = new AbortController();

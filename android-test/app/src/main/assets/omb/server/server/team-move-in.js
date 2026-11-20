@@ -10,11 +10,10 @@ import { z } from "zod";
 import { writeFileAtomic } from "./atomic.js";
 import { CHATS_BODY_MAX } from "./cloud-send-chats.js";
 import { personKey } from "./person-key.js";
+import { botProfileSettings } from "./request-auth.js";
 import { PASS } from "./routes/table.js";
 const BOT_ID = /^[\w-]{8,128}$/u;
 const KIND_BODY_MAX = 8 * 1024 * 1024;
-const BOT_FIELDS_ADMINS_SET = ["approvalMode", "autoApprove", "alwaysAllow"];
-const CHIEF_FIELDS = ["chiefOfStaff", "managedSections"];
 const moveInSchema = z.object({
     person: z.string().regex(/^p_[\w-]{22}$/u), email: z.string().max(320), who: z.string().min(1).max(40), name: z.string().min(1).max(120), threadId: z.string().regex(/^[\w-]{1,200}$/u).nullable(),
     state: z.enum(["moving", "done"]), at: z.number().finite(), doneAt: z.number().finite().optional(),
@@ -113,27 +112,20 @@ export function createTeamMoveIn(deps) {
         if (path === "/api/bots" && method === "POST") {
             if (body.id !== bot)
                 return refused;
-            const { threadId: _main, ...rest } = body;
-            return { ...rest, name: move.name };
+            const reportsTo = typeof body.reportsTo === "string" && same(body.reportsTo, move.email) ? body.reportsTo : undefined;
+            return { ...botProfileSettings(body), id: bot, name: move.name, useDefaults: false,
+                ...(record(body.settings) ? { settings: botProfileSettings(body.settings) } : {}), ...(reportsTo ? { reportsTo } : {}) };
         }
         if (path === `/api/bots/${bot}` && method === "PATCH") {
-            const kept = { ...body };
-            for (const field of [...BOT_FIELDS_ADMINS_SET, ...CHIEF_FIELDS])
-                delete kept[field];
+            const kept = botProfileSettings(body);
             if (typeof kept.name === "string")
                 kept.name = move.name;
             return kept;
         }
         if (path === "/api/cloud-send/kind") {
             const key = typeof body.key === "string" ? body.key : "";
-            if (key === `bot:${bot}`) {
-                if (!record(body.record))
-                    return body;
-                const fields = { ...body.record };
-                for (const field of CHIEF_FIELDS)
-                    delete fields[field];
-                return { ...body, record: fields };
-            }
+            if (key === `bot:${bot}`)
+                return record(body.record) ? { ...body, record: botProfileSettings(body.record) } : body;
             const routine = /^routine:([\w-]{1,128})$/u.exec(key);
             if (routine && record(body.record) && body.record.botId === bot && body.record.target === "bot") {
                 const elsewhere = deps.routines()?.listRoutines().find((held) => held.id === routine[1] && held.botId !== bot);

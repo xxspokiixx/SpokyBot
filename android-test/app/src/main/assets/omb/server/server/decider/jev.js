@@ -4,6 +4,8 @@ export const JEV_MODEL = "jev-latest";
 export const JEV_MAX_OPTIONS = 255;
 export const JEV_MIN_LEVELS = 2;
 export const JEV_MAX_LEVELS = 10;
+/** Sent only with Cloud's included token, to the Admin's relay. */
+export const RELAY_SEAM_HEADER = "x-omb-seam";
 /** Null when the key must not be sent there: https anywhere, plain http only to this machine. */
 export function jevEndpoint(baseUrl) {
     const root = (baseUrl?.trim() || JEV_DEFAULT_BASE_URL).replace(/\/+$/, "");
@@ -132,6 +134,8 @@ export function parseJevResponse(body, questions) {
     return { ok: true, answers, ...(inputTokens !== undefined ? { inputTokens } : {}), ...(model ? { model } : {}) };
 }
 export function refusal(status) {
+    if (status === 413)
+        return { ok: false, reason: "too_large", status };
     if (status === 401 || status === 403)
         return { ok: false, reason: "rejected", status };
     if (status === 429)
@@ -148,7 +152,11 @@ async function decide(request) {
     try {
         response = await request.fetch(endpoint, {
             method: "POST",
-            headers: { authorization: `Bearer ${request.key}`, "content-type": "application/json", accept: "application/json" },
+            headers: {
+                authorization: `Bearer ${request.key}`, "content-type": "application/json", accept: "application/json",
+                // The relay checks the request against this seam's shape (server/decider/relay.ts); Jev itself never sees it.
+                ...(request.relaySeam ? { [RELAY_SEAM_HEADER]: request.relaySeam } : {}),
+            },
             body: JSON.stringify(jevRequestBody(request.state, request.questions)),
             signal: request.signal,
             // Never replay the key to wherever a redirect points.

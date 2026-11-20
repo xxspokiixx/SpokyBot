@@ -4,6 +4,12 @@ export class TurnResources {
     /** Only turns actually waiting: a lazy claim that failed once and moved on must not block the front. */
     waiters = new Map();
     waitStats = new Map();
+    claimListeners = new Set();
+    /** Told each time a claim makes a turn a resource's new holder; returns the way to stop listening. */
+    onClaim(listener) {
+        this.claimListeners.add(listener);
+        return () => { this.claimListeners.delete(listener); };
+    }
     startWaiting(resource, owner) {
         const queue = this.waiters.get(resource);
         if (!queue) {
@@ -65,6 +71,8 @@ export class TurnResources {
                 this.waiters.delete(resource);
         }
         this.owners.set(resource, owner);
+        for (const listener of this.claimListeners)
+            listener(resource, owner);
         return true;
     }
     holder(resource) {

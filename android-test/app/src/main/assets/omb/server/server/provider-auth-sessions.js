@@ -1,8 +1,14 @@
 const failure = (message, status) => Object.assign(new Error(message), { status });
 export class ProviderAuthSessions {
     flows = new Map();
+    /** A sign-in to this AI finished: whatever waited on it being signed out may use it again. */
+    signedIn;
+    constructor(options = {}) {
+        this.signedIn = options.signedIn ?? (() => { });
+    }
+    /** A sign-in under way, until it expires: one whose provider call never returns stops counting then too. */
     get active() {
-        return [...this.flows.values()].some((flow) => flow.busy || (!flow.revoked && flow.expiresAt > Date.now()));
+        return [...this.flows.values()].some((flow) => flow.expiresAt > Date.now() && (flow.busy || !flow.revoked));
     }
     async start(instance, owner) {
         if (!instance.startAuthentication)
@@ -26,8 +32,10 @@ export class ProviderAuthSessions {
             const expiry = Date.parse(result.expiresAt ?? "");
             if (Number.isFinite(expiry))
                 flow.expiresAt = expiry;
-            if (result.phase === "succeeded")
+            if (result.phase === "succeeded") {
                 this.flows.delete(instance.instanceId);
+                this.signedIn(instance.instanceId);
+            }
             return result;
         }
         catch (error) {
@@ -58,6 +66,8 @@ export class ProviderAuthSessions {
             throw failure("This sign-in session ended.", 404);
         if (status.phase !== "waiting")
             flow.expiresAt = 0;
+        if (status.phase === "succeeded")
+            this.signedIn(instanceId);
         return status;
     }
     async complete(instanceId, owner, flowId, callbackUrl) {
@@ -69,6 +79,7 @@ export class ProviderAuthSessions {
             await flow.instance.completeAuthentication(flowId, callbackUrl);
             if (this.flows.get(instanceId) === flow)
                 this.flows.delete(instanceId);
+            this.signedIn(instanceId);
         }
         finally {
             flow.busy = false;

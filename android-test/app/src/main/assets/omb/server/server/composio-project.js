@@ -1,9 +1,11 @@
 // A person's own Composio project, reached with their ak_ key. A Tool Router Session uses one of the project's own auth
-// configs (a bring-your-own OAuth app such as Xero or Buffer, or an API-key toolkit) only when it is created with that
-// config's id under `auth_configs`, keyed by toolkit, and the config must be enabled for Tool Router:
+// configs (a bring-your-own OAuth app such as Xero or Buffer, or an API-key toolkit) only when it names that config's id
+// under `auth_configs`, keyed by toolkit, and only while the config is enabled for Tool Router. A config a person made
+// themselves can have that off or unset, which Composio's own CLI reads as off; the API's PATCH sets it (v3.1, Oct 2026):
 // https://docs.composio.dev/docs/configuring-sessions
 // https://docs.composio.dev/kb/guide/mcp-tool-router-sessions
 // https://docs.composio.dev/reference/api-reference/auth-configs/getAuthConfigs
+// https://docs.composio.dev/reference/api-reference/auth-configs/patchAuthConfigsByNanoid
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -41,9 +43,11 @@ export function canonicalToolkitSlug(slug) {
 }
 const authConfigItemSchema = z.object({
     id: z.string().optional(),
+    type: z.string().nullable().optional(),
     status: z.string().nullable().optional(),
     is_composio_managed: z.boolean().optional(),
     is_enabled_for_tool_router: z.boolean().nullable().optional(),
+    created_at: z.string().nullable().optional(),
     last_updated_at: z.string().nullable().optional(),
     toolkit: z.object({ slug: z.string().optional() }).optional(),
 });
@@ -58,9 +62,7 @@ function usableConfig(item) {
     return item.is_composio_managed !== true && (!item.status || /^enabled$/i.test(item.status));
 }
 async function readListing(apiKey) {
-    const found = new Map();
-    const usable = new Map();
-    const offForToolRouter = new Set();
+    const byToolkit = new Map();
     let cursor;
     for (let page = 0; page < MAX_AUTH_CONFIG_PAGES; page++) {
         const params = new URLSearchParams({ is_composio_managed: "false", limit: "100" });
@@ -77,24 +79,22 @@ async function readListing(apiKey) {
             const slug = item.toolkit?.slug ? canonicalToolkitSlug(item.toolkit.slug) : "";
             if (!slug || !item.id || !usableConfig(item))
                 continue;
-            if (item.is_enabled_for_tool_router === false) {
-                offForToolRouter.add(slug);
-                continue;
-            }
-            usable.set(item.id, slug);
-            found.set(slug, [...found.get(slug) ?? [], { id: item.id, updated: item.last_updated_at ?? "" }]);
+            byToolkit.set(slug, [...byToolkit.get(slug) ?? [], {
+                    id: item.id,
+                    type: item.type || "custom",
+                    toolRouter: item.is_enabled_for_tool_router === true,
+                    created: item.created_at || item.last_updated_at || "",
+                }]);
         }
         const next = body.next_cursor ?? undefined;
         if (!next || next === cursor)
             break;
         cursor = next;
     }
-    const byToolkit = new Map();
-    for (const [slug, configs] of found) {
-        byToolkit.set(slug, configs.sort((a, b) => b.updated.localeCompare(a.updated)).map(({ id }) => id));
-        offForToolRouter.delete(slug);
+    for (const configs of byToolkit.values()) {
+        configs.sort((a, b) => b.created.localeCompare(a.created) || a.id.localeCompare(b.id));
     }
-    return { byToolkit, usable, offForToolRouter };
+    return { byToolkit };
 }
 const listings = new Map();
 const listingReads = new Map();
@@ -110,9 +110,8 @@ function refreshListing(apiKey, project) {
     const read = readListing(apiKey).then((listing) => ({ listing, expiresAt: Date.now() + LISTING_TTL_MS }), (error) => {
         const readError = error instanceof Error ? error.message : String(error);
         console.warn(`[composio] could not read the project's auth configs (${readError}); Sessions keep the last list`);
-        const previous = listings.get(project)?.listing;
         return {
-            listing: previous ?? { byToolkit: new Map(), usable: new Map(), offForToolRouter: new Set() },
+            listing: listings.get(project)?.listing ?? { byToolkit: new Map() },
             expiresAt: Date.now() + LISTING_RETRY_MS,
             readError,
         };
@@ -123,26 +122,27 @@ function refreshListing(apiKey, project) {
     listingReads.set(project, read);
     return read;
 }
-/** The auth configs a Session for this project should name. Never throws: a failed read keeps the last list (or none). */
+/** The project's auth configs per toolkit. Never throws: a failed read keeps the last list (or none). */
 export async function projectAuthConfigs(apiKey, options = {}) {
     const project = projectFingerprint(apiKey);
     const cached = listings.get(project);
     const entry = !options.fresh && cached && Date.now() < cached.expiresAt ? cached : await refreshListing(apiKey, project);
     const picked = authConfigPicks(project);
-    const configs = {};
-    for (const [slug, ids] of entry.listing.byToolkit) {
-        const pick = picked[slug];
-        const chosen = pick && entry.listing.usable.get(pick) === slug ? pick : ids[0];
-        configs[slug] = chosen;
+    const choices = {};
+    for (const slug of [...entry.listing.byToolkit.keys()].sort()) {
+        const configs = entry.listing.byToolkit.get(slug);
+        const named = configs.find((config) => config.id === picked[slug]);
+        const chosen = named ?? configs[0];
+        choices[slug] = { id: chosen.id, type: chosen.type, toolRouter: chosen.toolRouter, of: configs.length, named: Boolean(named) };
         const logKey = `${project}:${slug}`;
-        if (ids.length > 1 && chosen !== pick && loggedChoices.get(logKey) !== chosen) {
-            loggedChoices.set(logKey, chosen);
-            console.info(`[composio] ${ids.length} enabled auth configs for ${slug}; using the most recently updated, ${chosen}`);
+        if (configs.length > 1 && !named && loggedChoices.get(logKey) !== chosen.id) {
+            loggedChoices.set(logKey, chosen.id);
+            console.info(`[composio] ${configs.length} enabled auth configs for ${slug}; using the most recently created, ${chosen.id}`);
         }
     }
     return {
-        configs: Object.fromEntries(Object.entries(configs).sort(([a], [b]) => a.localeCompare(b))),
-        offForToolRouter: [...entry.listing.offForToolRouter].sort(),
+        choices,
+        configs: Object.fromEntries(Object.entries(choices).flatMap(([slug, choice]) => choice.toolRouter ? [[slug, choice.id]] : [])),
         ...(entry.readError ? { readError: entry.readError } : {}),
     };
 }
@@ -154,6 +154,22 @@ export function forgetProjectAuthConfigs(apiKey) {
     const entry = apiKey === undefined ? undefined : listings.get(projectFingerprint(apiKey));
     if (entry)
         entry.expiresAt = 0;
+}
+/** Changes one flag on the person's own config, and only once a connection for its toolkit needs it. */
+export async function turnOnToolRouter(apiKey, toolkit, choice) {
+    const res = await fetch(`${apiBase()}/auth_configs/${encodeURIComponent(choice.id)}`, {
+        method: "PATCH",
+        headers: projectHeaders(apiKey, true),
+        body: JSON.stringify({ type: choice.type, is_enabled_for_tool_router: true }),
+        signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok)
+        throw inputError(toolRouterOffReason(toolkit, choice.id, await responseError(res, `HTTP ${res.status}`)), 409);
+    console.info(`[composio] turned on Tool Router for the ${toolkit} auth config ${choice.id}`);
+    for (const config of listings.get(projectFingerprint(apiKey))?.listing.byToolkit.get(toolkit) ?? []) {
+        if (config.id === choice.id)
+            config.toolRouter = true;
+    }
 }
 const picksFileSchema = z.object({
     version: z.literal(1),
@@ -176,11 +192,12 @@ export function noAuthConfigReason(toolkit) {
     return `${toolkit} has no Composio-managed sign-in. In your Composio project, create an auth config for "${toolkit}" `
         + "(Auth Configs → Create) with your own app credentials, then click Connect again.";
 }
-export function offForToolRouterReason(toolkit) {
-    return `Your ${toolkit} auth config is not enabled for Tool Router. Enable it for Tool Router in your Composio project, then connect ${toolkit} again.`;
+function toolRouterOffReason(toolkit, id, said) {
+    return `SpokyBot could not turn on Tool Router for your ${toolkit} auth config ${id}, which Composio needs before it `
+        + `uses it. Check that your Composio project key may edit auth configs. Composio said: ${said}`;
 }
 export function refusedAuthConfigReason(toolkit, said) {
-    return `Composio would not use your ${toolkit} auth config. Check it is enabled, and enabled for Tool Router, in your Composio project. Composio said: ${said}`;
+    return `Composio would not use your ${toolkit} auth config. Check it is enabled in your Composio project. Composio said: ${said}`;
 }
 /** A bot's explicit `auth_config_id`, checked against the project before any Session names it. */
 async function checkAuthConfigPick(apiKey, toolkit, id) {
@@ -202,8 +219,6 @@ async function checkAuthConfigPick(apiKey, toolkit, id) {
     }
     if (!usableConfig(item))
         throw inputError(`Auth config ${id} for ${toolkit} is disabled. Enable it in your Composio project, then connect again.`);
-    if (item.is_enabled_for_tool_router === false)
-        throw inputError(offForToolRouterReason(toolkit));
 }
 /** Checks a bot's pick and keeps it for this project's later Sessions; it wins over the newest config while it stays usable. */
 export async function keepAuthConfigPick(apiKey, toolkit, id) {

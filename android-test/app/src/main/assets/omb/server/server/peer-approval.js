@@ -7,8 +7,7 @@ export { peerAllowKey } from "./peer-approval-key.js";
 export function peerApprovalFailure(outcome) {
     return {
         error: outcome === "deny" ? "denied by user"
-            : outcome === "expired" ? "the approval card expired without an answer"
-                : "the approval was cancelled before a decision",
+            : "the approval was cancelled before a decision",
         approvalOutcome: outcome,
         approvalSource: outcome === "deny" ? "user" : "system",
     };
@@ -35,7 +34,6 @@ function settleCard(pending, behavior, source) {
     }
 }
 const pendingComms = new Map();
-const APPROVAL_TIMEOUT_MS = 15 * 60_000;
 function allowKeyAllowed(from, allowKey) {
     return from.alwaysAllow?.includes(allowKey) ?? false;
 }
@@ -81,21 +79,11 @@ export function requestPeerApproval(bus, from, target, message, action, sourceTh
     }
     return new Promise((resolve) => {
         const requestId = newId();
-        // The card must exist before the entry, so a timeout or an answer can always settle it.
+        // The card must exist before the entry, so an answer or a cancellation can always settle it.
         const card = pushApprovalCard(bus, from, target, message, action, requestId, sourceThreadId);
         announceCard(bus, from, card, sourceThreadId);
-        const timer = setTimeout(() => {
-            const pending = pendingComms.get(requestId);
-            if (!pending)
-                return;
-            pendingComms.delete(requestId);
-            settleCard(pending, "deny", "system");
-            resolve("expired");
-        }, APPROVAL_TIMEOUT_MS);
-        timer.unref?.();
         pendingComms.set(requestId, {
             resolve,
-            timer,
             fromBotId: from.id,
             toBotId: target.id,
             message,
@@ -117,7 +105,6 @@ export function resolvePeerComms(_bus, requestId, behavior) {
     if (!pending)
         return false;
     pendingComms.delete(requestId);
-    clearTimeout(pending.timer);
     const allow = behavior === "allow";
     settleCard(pending, allow ? "allow" : "deny", "user");
     pending.resolve(allow ? "allow" : "deny");
@@ -128,7 +115,6 @@ export function cancelPeerApprovalsFor(botId) {
         if (pending.fromBotId !== botId && pending.toBotId !== botId)
             continue;
         pendingComms.delete(requestId);
-        clearTimeout(pending.timer);
         settleCard(pending, "deny", "system");
         pending.resolve("cancelled");
     }
@@ -138,7 +124,6 @@ export function cancelPeerApprovalsForThread(threadId) {
         if (pending.threadId !== threadId)
             continue;
         pendingComms.delete(requestId);
-        clearTimeout(pending.timer);
         settleCard(pending, "deny", "system");
         pending.resolve("cancelled");
     }

@@ -1,12 +1,11 @@
 // Encrypted filesystem snapshot: quiesce writers before create/commit; restore runs before config/store load.
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID, scrypt } from "node:crypto";
 import { chmodSync, closeSync, constants, cpSync, createReadStream, createWriteStream, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, realpathSync, renameSync, rmSync, writeFileSync, writeSync, } from "node:fs";
-import { isAbsolute, join, parse, posix, relative, resolve, win32 } from "node:path";
+import { isAbsolute, join, parse, posix, relative, resolve, sep, win32 } from "node:path";
 import { homedir } from "node:os";
 import { backup, DatabaseSync } from "node:sqlite";
 import { pipeline } from "node:stream/promises";
 import { Worker } from "node:worker_threads";
-import * as tar from "tar";
 import { writeFileAtomic } from "./atomic.js";
 import { WORKSPACE_BACKUP_CLIENT_KEYS } from "../shared/workspace-backup-client.js";
 import { INSTRUCTION_FILE, restorePaths, validRelative } from "./workspace-backup-paths.js";
@@ -19,6 +18,7 @@ const MAGIC = Buffer.from("OMB-WORKSPACE-1\n");
 const HEADER_BYTES = MAGIC.length + 16 + 12;
 const TAG_BYTES = 16;
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const WAITS_FILE = "waits.json";
 const EXCLUDED = new Set([
     ".backups", "tools", "browser", "agent-browser-profiles", "cache", ".cache", "tmp", ".tmp", "dist-native", "tunnel-runtime", "evidence",
     ".openmausbot-server-child", "environment-id", "sessions.json", "tunnel-account.json",
@@ -32,6 +32,12 @@ const EXCLUDED = new Set([
     "claude-user-skills",
     // The bot box's live sockets and seccomp filter (bot-box/box.ts), made again each time the server starts.
     "box",
+    // A Team Cloud's engine homes (engine-homes/layout.ts): CLI login homes, each audience's own transcripts and the held
+    // folder, which no admin reads.
+    "engine-homes",
+    // The Android local-computer rootfs (several hundred MB) is reinstalled by the app, not user data.
+    "linux",
+    WAITS_FILE,
 ]);
 const EXCLUSION_NOTES = [
     "Device pairing, server identity, live leases and runtime files (existing destination identities are preserved).",
@@ -40,8 +46,9 @@ const EXCLUSION_NOTES = [
     "Installed dependency folders (node_modules) and symbolic links inside conversation work folders; reinstall or recreate them in the project.",
     "External project folders, CLI login homes, browser session homes, OS keychains, companion devices and other servers.",
     "VM/container disk layers and remote cloud data; durable files inside this workspace are included.",
+    "Waits bots set up: they end within a week, so ask the bot again after restoring.",
 ];
-const RESTORE_WARNING = "Restoring pauses routines, webhooks and calendar calls, and does not resume pending delegations, queued chat messages or queued runs. Definitions and historical receipts are retained; review before enabling them again.";
+const RESTORE_WARNING = "Restoring pauses routines, webhooks and calendar calls, ends every wait, and does not resume pending delegations, queued chat messages or queued runs. Definitions and historical receipts are retained; review before enabling them again.";
 function excluded(name) {
     return EXCLUDED.has(name) || excludedWorkspaceAuthPath(name) || name.startsWith("openmausbot-server.lease.") || name.startsWith("box-create-requests.lock.") || /^perm-[A-Za-z0-9_-]+\.sock$/.test(name);
 }
@@ -51,9 +58,9 @@ function forbiddenArchivePath(path) {
         (path !== folded && ["config.json", "webhooks.json"].includes(folded));
 }
 function preserved(name) {
-    // An existing WAL/SHM belongs to the old database: it must never accompany a different restored main database.
+    // An existing WAL/SHM belongs to the old database, and existing waits to the old chats: neither may accompany restored ones.
     const folded = name.toLowerCase();
-    return excluded(folded) && !LIVE_DATABASE_SIDECARS.has(folded);
+    return excluded(folded) && !LIVE_DATABASE_SIDECARS.has(folded) && folded !== WAITS_FILE;
 }
 const SNAPSHOT_DATABASES = { "messages.db": "messages-snapshot.db", "runtime.db": "runtime-snapshot.db" };
 const LIVE_DATABASE_SIDECARS = new Set(Object.keys(SNAPSHOT_DATABASES).flatMap((name) => [`${name}-wal`, `${name}-shm`]));
@@ -162,8 +169,8 @@ function assertLocalAuthOutsideSnapshot(dataDir) {
     }
 }
 function passwordKey(password, salt) {
-    if (typeof password !== "string" || password.length === 0 || Buffer.byteLength(password) > 1024) {
-        throw new Error("Use a non-empty backup password of at most 1024 bytes.");
+    if (typeof password !== "string" || password.length < 1 || Buffer.byteLength(password) > 1024) {
+        throw new Error("Use a backup password of at least 1 character (at most 1024 bytes).");
     }
     return new Promise((resolveKey, reject) => {
         scrypt(password, salt, 32, { N: 131_072, r: 8, p: 1, maxmem: 256 * 1024 ** 2 }, (error, key) => {
@@ -306,7 +313,6 @@ export async function createWorkspaceBackupSnapshot(dataDir, options, jobId) {
     if (Object.hasOwn(options, "credentials"))
         throw new Error("Workspace backups do not transfer credentials.");
     assertLocalAuthOutsideSnapshot(dataDir);
-    const selection = options.selection ?? { history: true, skills: true, automations: true, savedLogins: true, apiKeys: true };
     const salt = randomBytes(16);
     const key = await passwordKey(options.password, salt);
     const job = newJob(dataDir, jobId);
@@ -319,17 +325,7 @@ export async function createWorkspaceBackupSnapshot(dataDir, options, jobId) {
     let skippedLinks = 0;
     let skippedDependencies = 0;
     let skippedWorkLinks = 0;
-    function shouldInclude(path) {
-        if (path.startsWith("messages") || path.startsWith("bots.json") || path.startsWith("groups.json"))
-            return selection.history;
-        if (path.startsWith("skills") || path.startsWith("claude-user-skills"))
-            return selection.skills;
-        if (path.startsWith("routines.json") || path.startsWith("calendar-calls.json") || path.startsWith("app-triggers.json") || path.startsWith("delegations.json") || path.startsWith("browser-cleanups.json"))
-            return selection.automations;
-        if (path === "config.json" || path === "webhooks.json" || path.startsWith("providers") || path.startsWith("mcp-servers"))
-            return selection.savedLogins || selection.apiKeys;
-        return true; // Include unknown paths by default
-    }
+    let copiedLinks = 0;
     try {
         const root = realpathSync(dataDir);
         for (const [name, snapshotName] of Object.entries(SNAPSHOT_DATABASES)) {
@@ -357,22 +353,20 @@ export async function createWorkspaceBackupSnapshot(dataDir, options, jobId) {
                 snapshotDb.close();
             }
         }
-        const walk = (directory, prefix = "") => {
+        const walk = (directory, prefix = "", chain = [root]) => {
             for (const name of readdirSync(directory).sort()) {
                 if (!prefix && excluded(name))
                     continue;
                 const path = prefix ? `${prefix}/${name}` : name;
                 if (excludedWorkspaceAuthPath(path) || ephemeralWorkspaceTokenPath(path) || redownloadedOrgLibraryPath(path) || liveDataEnginePath(path))
                     continue;
-                if (!shouldInclude(path))
-                    continue;
                 // Reject noncanonical spellings: a case-sensitive host must not export auth paths active on Windows/Mac.
                 if (forbiddenArchivePath(path))
                     throw new Error("A workspace filename conflicts with a protected authentication or runtime path.");
                 if (!validRelative(path))
                     throw new Error(`Cannot back up a name that cannot be restored on every supported platform, such as one with ":" or "\\", a trailing dot or space, or a Windows device name like CON or AUX; rename it first: ${path}`);
-                const source = join(directory, name);
-                const stat = lstatSync(source);
+                let source = join(directory, name);
+                let stat = lstatSync(source);
                 if (name === "node_modules" && (stat.isDirectory() || stat.isSymbolicLink())) {
                     skippedDependencies++;
                     continue;
@@ -396,13 +390,23 @@ export async function createWorkspaceBackupSnapshot(dataDir, options, jobId) {
                     if (rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(rel)) {
                         throw new Error(`Cannot back up symbolic link outside the workspace: ${path}`);
                     }
+                    const portableRel = rel.replaceAll("\\", "/");
                     // Only the app's disposable native-discovery links may be omitted; any other link is user data.
-                    if (!/^workspaces\/[^/]+\/\.(?:claude|agents|grok)\/skills\/[^/]+$/.test(path) ||
-                        !rel.replaceAll("\\", "/").startsWith(`workspaces/${path.split("/")[1]}/skills/`)) {
+                    if (/^workspaces\/[^/]+\/\.(?:claude|agents|grok)\/skills\/[^/]+$/.test(path) &&
+                        portableRel.startsWith(`workspaces/${path.split("/")[1]}/skills/`)) {
+                        skippedLinks++;
+                        continue;
+                    }
+                    const workspace = /^workspaces\/[^/]+\//.exec(path)?.[0];
+                    if (!workspace || !portableRel.startsWith(workspace)) {
                         throw new Error(`Cannot back up user-created symbolic link; replace it with regular files first: ${path}`);
                     }
-                    skippedLinks++;
-                    continue;
+                    if (chain.some((folder) => folder === target || folder.startsWith(`${target}${sep}`))) {
+                        throw new Error(`Cannot back up a symbolic link to the folder that contains it: ${path}`);
+                    }
+                    source = target;
+                    stat = lstatSync(source);
+                    copiedLinks++;
                 }
                 if (entries.length >= MAX_WORKSPACE_BACKUP_FILES)
                     throw new Error("The workspace exceeds the 100,000-entry backup limit.");
@@ -414,7 +418,7 @@ export async function createWorkspaceBackupSnapshot(dataDir, options, jobId) {
                 if (stat.isDirectory()) {
                     folder(destination);
                     entries.push({ path, type: "directory", size: 0, mode: 0o700 });
-                    walk(source, path);
+                    walk(source, path, [...chain, source]);
                 }
                 else if (stat.isFile()) {
                     let copied;
@@ -455,6 +459,8 @@ export async function createWorkspaceBackupSnapshot(dataDir, options, jobId) {
             warnings.push(`${skippedLinks} managed skill discovery link(s) were omitted and are recreated by the app.`);
         if (skippedDependencies)
             warnings.push(`${skippedDependencies} installed dependency folder(s) (node_modules) were omitted; reinstall them in the project after restoring.`);
+        if (copiedLinks)
+            warnings.push(`${copiedLinks} symbolic link(s) inside a workspace were saved as copies of what they point to; restoring creates regular files and folders there.`);
         if (skippedWorkLinks)
             warnings.push(`${skippedWorkLinks} symbolic link(s) in conversation work folders were omitted; what they point to is outside this backup.`);
         const summary = {
@@ -466,7 +472,7 @@ export async function createWorkspaceBackupSnapshot(dataDir, options, jobId) {
             exclusions: EXCLUSION_NOTES, warnings,
         };
         const manifest = {
-            summary, sourceDataDir: resolve(dataDir), clientState: options.clientState ?? {}, entries, selection,
+            summary, sourceDataDir: resolve(dataDir), clientState: options.clientState ?? {}, entries,
         };
         writeJson(join(snapshot, "manifest.json"), manifest);
         validateManifest(privateJson(join(snapshot, "manifest.json")));
@@ -476,6 +482,7 @@ export async function createWorkspaceBackupSnapshot(dataDir, options, jobId) {
         const cipher = createCipheriv("aes-256-gcm", key, iv);
         cipher.setAAD(header);
         writeFileSync(path, header, { mode: 0o600, flag: "wx" });
+        const tar = await import("tar");
         await pipeline(tar.c({ cwd: snapshot, portable: true, strict: true }, ["manifest.json", "data"]), cipher, createWriteStream(path, { flags: "a", mode: 0o600 }));
         const fd = openSync(path, "a");
         try {
@@ -504,7 +511,7 @@ function validateManifest(value) {
         value.sourceDataDir.length > 4096 || value.sourceDataDir.includes("\0") ||
         value.sourceDataDir === posix.parse(value.sourceDataDir).root || value.sourceDataDir === win32.parse(value.sourceDataDir).root ||
         value.sourceDataDir.replaceAll("\\", "/").split("/").some((part) => part === "." || part === "..") ||
-        Object.keys(value).some((key) => !["summary", "sourceDataDir", "clientState", "entries", "selection"].includes(key)) ||
+        Object.keys(value).some((key) => !["summary", "sourceDataDir", "clientState", "entries"].includes(key)) ||
         Object.keys(value.summary).some((key) => !["format", "version", "id", "createdAt", "appVersion", "files", "directories", "bytes", "bots", "groups", "threads", "messages", "exclusions", "warnings"].includes(key)) || !record(value.clientState) ||
         !Object.values(value.clientState).every((item) => typeof item === "string") || !Array.isArray(value.entries) ||
         value.entries.length > MAX_WORKSPACE_BACKUP_FILES)
@@ -512,11 +519,6 @@ function validateManifest(value) {
     if (Object.keys(value.clientState).some((key) => !WORKSPACE_BACKUP_CLIENT_KEYS.includes(key)) ||
         Buffer.byteLength(JSON.stringify(value.clientState)) > 2 * 1024 ** 2)
         throw new Error("Invalid or oversized workspace client preferences.");
-    const selection = value.selection;
-    if (!record(selection) || typeof selection.history !== "boolean" || typeof selection.skills !== "boolean" ||
-        typeof selection.automations !== "boolean" || typeof selection.savedLogins !== "boolean" || typeof selection.apiKeys !== "boolean") {
-        throw new Error("Invalid backup selection in manifest.");
-    }
     for (const key of ["files", "directories", "bytes", "bots", "groups", "threads", "messages"]) {
         if (!Number.isSafeInteger(value.summary[key]) || value.summary[key] < 0)
             throw new Error("Invalid workspace backup summary.");
@@ -601,6 +603,7 @@ async function inspectTar(path) {
     const names = new Set();
     let bytes = 0;
     let problem = "";
+    const tar = await import("tar");
     await tar.t({ file: path, strict: true, brotli: false, zstd: false, onReadEntry(entry) {
             const name = entry.type === "Directory" ? entry.path.replace(/\/$/, "") : entry.path;
             const expectedRoot = name === "manifest.json" || name === "data" || name.startsWith("data/");
@@ -693,22 +696,10 @@ export async function stageWorkspaceBackup(dataDir, archivePath, options) {
         const expected = await inspectTar(plaintext);
         const staged = join(job.directory, "staged");
         folder(staged);
+        const tar = await import("tar");
         await tar.x({ file: plaintext, cwd: staged, strict: true, preservePaths: false, umask: 0o077, noChmod: true, brotli: false, zstd: false });
         const manifest = validateStaged(staged, expected);
-        const versions = [manifest.summary.appVersion, options.currentAppVersion ?? ""].map((version) => /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(version)?.slice(1).map(Number));
-        if (versions[0] && versions[1]) {
-            let newer = false;
-            for (let i = 0; i < 3; i++) {
-                if (versions[0][i] > versions[1][i]) {
-                    newer = true;
-                    break;
-                }
-                if (versions[0][i] < versions[1][i])
-                    break;
-            }
-            if (newer)
-                manifest.summary.warnings.push(`This backup was created by SpokyBot ${manifest.summary.appVersion}, newer than this app (${options.currentAppVersion}). Some newer settings may not be recognized.`);
-        }
+        // No version check: backups can be imported from any build version
         rmSync(plaintext);
         writeJson(join(job.directory, "ready.json"), { id: job.id, summary: manifest.summary });
         return { id: job.id, summary: manifest.summary };
@@ -732,7 +723,7 @@ export function stagedWorkspaceData(dataDir, id) {
     const staged = join(jobPath(dataDir, id), "staged");
     return { data: join(staged, "data"), sourceDataDir: validateManifest(privateJson(join(staged, "manifest.json"))).sourceDataDir };
 }
-export function commitPendingWorkspaceRestore(dataDir, id) {
+export function commitPendingWorkspaceRestore(dataDir, id, categories) {
     const root = backupRoot(dataDir);
     if (existsSync(join(root, "pending-restore.json")))
         throw new Error("A workspace restore is already waiting for restart.");
@@ -742,7 +733,7 @@ export function commitPendingWorkspaceRestore(dataDir, id) {
     const manifest = validateStaged(join(jobPath(dataDir, id), "staged"));
     // Adapt before persisting a restart request: a broken legacy file must not trap later boots.
     prepareRestore(dataDir, id, manifest);
-    writeJson(join(root, "pending-restore.json"), { id });
+    writeJson(join(root, "pending-restore.json"), { id, categories });
     return { id, restartRequired: true, summary: metadata.summary };
 }
 export function readPendingWorkspaceRestoreMetadata(dataDir) {
@@ -753,7 +744,10 @@ export function readPendingWorkspaceRestoreMetadata(dataDir) {
     const pending = privateJson(path);
     if (!record(pending) || typeof pending.id !== "string")
         throw new Error("Invalid pending workspace restore.");
-    return readStagedWorkspaceBackup(dataDir, pending.id);
+    const result = readStagedWorkspaceBackup(dataDir, pending.id);
+    if (Array.isArray(pending.categories))
+        result.categories = pending.categories;
+    return result;
 }
 function readJournal(path) {
     const raw = privateJson(path);
@@ -1046,6 +1040,24 @@ function finishRestore(dataDir, id, consumePending = true) {
         rmSync(join(root, "pending-restore.json"), { force: true });
     return result;
 }
+function categoryMatches(category, name) {
+    switch (category) {
+        case "bots": return name === "bots.json";
+        case "groups": return name === "groups.json";
+        case "threads":
+        case "messages": return name === "messages.db" || name.startsWith("messages-") && name.endsWith(".json");
+        case "files": return name.startsWith("workspaces/") || name.startsWith("task-workspaces/");
+        case "config": return name === "config.json" || name === "webhooks.json" || name === "routines.json" || name === "calendar-calls.json" || name === "app-triggers.json";
+        case "routines": return name === "routines.json";
+        case "webhooks": return name === "webhooks.json";
+        default: return true;
+    }
+}
+function filterIncomingByCategories(incoming, categories) {
+    if (!categories || categories.length === 0)
+        return incoming;
+    return incoming.filter(name => categories.some(cat => categoryMatches(cat, name)));
+}
 /** Call after the data-directory lease, before anything reads app state; the old tree stays under .backups/safety-ID. */
 export function applyPendingWorkspaceRestore(dataDir) {
     const root = backupRoot(dataDir);
@@ -1076,10 +1088,12 @@ export function applyPendingWorkspaceRestore(dataDir) {
     if (existsSync(safetyCopyPath))
         throw new Error("A safety copy already exists for this restore. Original files have not been changed.");
     folder(join(safetyCopyPath, "data"));
+    const allIncoming = readdirSync(prepared).sort();
+    const incoming = filterIncomingByCategories(allIncoming, pending.categories);
     const journal = {
         id: pending.id, phase: "applying",
         existing: readdirSync(dataDir).filter((name) => !keptInPlace(name)).sort(),
-        incoming: readdirSync(prepared).sort(),
+        incoming,
     };
     // Names are checked before any move is recorded; a restored root never traverses an archive-controlled directory.
     for (const name of [...journal.existing, ...journal.incoming]) {

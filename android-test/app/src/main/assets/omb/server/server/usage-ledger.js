@@ -1,9 +1,10 @@
 // Append-only usage rows under <data>/usage/ (0600): bookkeeping never fails the turn, and rows never carry message text.
+import { personOf } from "./usage-attribution.js";
 import { readFileSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { billableFor } from "./prices.js";
-export const USAGE_GROUPINGS = ["bot", "model", "user", "day", "engine", "routine"];
+export const USAGE_GROUPINGS = ["bot", "model", "user", "day", "engine", "routine", "department"];
 const DIR = "usage";
 const MAX_RANGE_DAYS = 366;
 const DAY_MS = 24 * 60 * 60_000;
@@ -172,14 +173,19 @@ function groupOf(row, groupBy) {
             return { key: `bot:${row.botId}`, label: row.botName || row.botId };
         case "model":
             return { key: `model:${row.driverKind}/${row.model}`, label: row.model };
-        case "user":
-            return { key: triggerKey(row.trigger), label: triggerLabel(row.trigger) };
+        case "user": {
+            // A routine's or a teammate's work for a known person counts as theirs.
+            const email = personOf(row.trigger);
+            return email ? { key: `user:${email.toLowerCase()}`, label: email } : { key: triggerKey(row.trigger), label: triggerLabel(row.trigger) };
+        }
         case "day":
             return { key: `day:${row.at.slice(0, 10)}`, label: row.at.slice(0, 10) };
         case "routine":
             return row.trigger.kind === "routine"
                 ? { key: triggerKey(row.trigger), label: row.trigger.label ?? row.trigger.routineId ?? "unknown" }
                 : { key: "manual", label: "Not from a routine" };
+        case "department":
+            return { key: `department:${row.section ?? ""}`, label: row.section ?? "" };
         default:
             return { key: `engine:${row.driverKind}`, label: row.driverKind };
     }
@@ -243,7 +249,7 @@ export function csvCell(value) {
     return /[",\n\r]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
 }
 export function usageCsv(rows, prices = null) {
-    const header = ["time", "bot", "model", "engine", "triggered_by", "input_tokens", "output_tokens", "cached_input_tokens", "cost_usd", "cost_source", ...(prices ? ["billable_usd"] : []), "thread"];
+    const header = ["time", "bot", "model", "engine", "triggered_by", "input_tokens", "output_tokens", "cached_input_tokens", "cost_usd", "cost_source", ...(prices ? ["billable_usd"] : []), "thread", "department", "person"];
     const lines = [header.join(",")];
     for (const row of rows) {
         lines.push([
@@ -259,6 +265,8 @@ export function usageCsv(rows, prices = null) {
             costSourceOf(row),
             ...(prices ? [billableFor(row, prices)] : []),
             row.threadId,
+            row.section ?? "",
+            personOf(row.trigger) ?? "",
         ].map(csvCell).join(","));
     }
     return lines.join("\n") + "\n";

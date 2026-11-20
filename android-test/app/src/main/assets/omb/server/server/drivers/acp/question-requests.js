@@ -4,7 +4,7 @@ import { askQuestionSummary, MAX_QUESTIONS, questionChoices } from "../../../sha
 export function questionRequestFor(requests, method) {
     return typeof method === "string" && requests && Object.hasOwn(requests, method) ? requests[method] : undefined;
 }
-/** One question card for the whole set. Only the person's own reply answers it; anything else sends the vendor's
+/** One question card for the whole set, open until the person answers or the turn ends. Only the person's own reply answers it; anything else sends the vendor's
  * cancelled reply, so the agent is never left blocked and no system note reads as an answer. */
 export function openQuestionRequest(msg, request, turn, send, emit, base) {
     const parsed = request.parse(msg.params);
@@ -17,7 +17,6 @@ export function openQuestionRequest(msg, request, turn, send, emit, base) {
     const finish = (behavior, source = "user", message) => {
         if (!turn.asks.delete(requestId))
             return "unavailable";
-        clearTimeout(timer);
         const reply = behavior === "answer" && source === "user" && typeof message === "string" && message.trim()
             ? parsed.answered(message)
             : null;
@@ -26,8 +25,6 @@ export function openQuestionRequest(msg, request, turn, send, emit, base) {
         emit({ ...base(), type: "request.resolved", requestId, behavior: answered ? "answer" : "deny", source });
         return answered ? "answered" : "rejected";
     };
-    const timer = setTimeout(() => finish("deny", "timeout"), 15 * 60_000);
-    timer.unref?.();
     turn.asks.set(requestId, finish);
     const choices = questionChoices(parsed.questions);
     emit({

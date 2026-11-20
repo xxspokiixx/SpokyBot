@@ -2,7 +2,14 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { writeFileAtomic } from "./atomic.js";
 import { DATA_DIR } from "./config.js";
+import { buildStamp } from "./environment.js";
+import { afterFirstEngineRead } from "./first-engine-read.js";
 const SAFE_INSTANCE_ID = /^[\w.-]+$/;
+/** A list this server's build read this recently is used as it is at start; an older one, or one an earlier build read,
+ * is read again in the background. A sleeping Cloud wakes many times an hour, and each read can start the engine's CLI. */
+export const STARTUP_MODEL_CACHE_FRESH_MS = 6 * 60 * 60_000;
+/** Engines opened since this server started: opening one again means its key or settings just changed. */
+const openedThisRun = new Set();
 export function startupModelCachePath(instanceId) {
     if (!SAFE_INSTANCE_ID.test(instanceId))
         return null;
@@ -54,22 +61,37 @@ function catalogFrom(value) {
                 ? { contextWindow: option.contextWindow }
                 : {}),
             ...(variants ? { variants } : {}),
+            ...(option.orgBlocked === true ? { orgBlocked: true } : {}),
         });
     }
     return { default: raw.default, options };
 }
-export function readStartupModelCache(instanceId) {
+const unconfirmed = new WeakSet();
+/** The engine did not give this list (its CLI timed out, or answered nothing): it is saved, but read again at the next start. */
+export function unconfirmedModelCatalog(catalog) {
+    unconfirmed.add(catalog);
+}
+export function readStartupModelCacheEntry(instanceId) {
     const path = startupModelCachePath(instanceId);
     if (!path)
         return null;
     try {
-        return catalogFrom(JSON.parse(readFileSync(path, "utf8")));
+        const raw = JSON.parse(readFileSync(path, "utf8"));
+        const catalog = catalogFrom(raw);
+        return catalog ? {
+            catalog,
+            checkedAt: typeof raw.checkedAt === "number" && Number.isFinite(raw.checkedAt) ? raw.checkedAt : null,
+            build: typeof raw.build === "string" ? raw.build : null,
+        } : null;
     }
     catch {
         return null;
     }
 }
-export function writeStartupModelCache(instanceId, catalog) {
+export function readStartupModelCache(instanceId) {
+    return readStartupModelCacheEntry(instanceId)?.catalog ?? null;
+}
+export function writeStartupModelCache(instanceId, catalog, read = {}) {
     if (!catalog.options.length)
         return;
     const path = startupModelCachePath(instanceId);
@@ -79,10 +101,13 @@ export function writeStartupModelCache(instanceId, catalog) {
     if (!stored)
         return;
     mkdirSync(dirname(path), { recursive: true });
-    writeFileAtomic(path, JSON.stringify(stored), { durable: false });
+    writeFileAtomic(path, JSON.stringify({ ...stored, checkedAt: read.checkedAt ?? (unconfirmed.has(catalog) ? 0 : Date.now()), build: read.build ?? buildStamp() }), { durable: false });
 }
 export function openStartupModelCatalog(input) {
-    const cached = readStartupModelCache(input.instanceId);
+    const reopened = openedThisRun.has(input.instanceId);
+    openedThisRun.add(input.instanceId);
+    const entry = readStartupModelCacheEntry(input.instanceId);
+    const cached = entry?.catalog ?? null;
     if (cached)
         input.use(cached);
     const persist = () => {
@@ -98,5 +123,10 @@ export function openStartupModelCatalog(input) {
             return null;
         });
     }
-    return { pending: input.refresh().then(persist, () => undefined) };
+    const age = (input.now ?? Date.now()) - (entry?.checkedAt ?? -Infinity);
+    if (cached && !reopened && entry?.build === buildStamp() && age >= 0 && age < STARTUP_MODEL_CACHE_FRESH_MS)
+        return Promise.resolve(null);
+    // A saved list stands in while the refresh waits; with none the engine would offer no model at all until it runs.
+    const startAfter = cached ? afterFirstEngineRead() : Promise.resolve();
+    return { pending: startAfter.then(() => input.refresh()).then(persist, () => undefined) };
 }

@@ -10,7 +10,7 @@ import { botAvatarUrlSchema } from "../../shared/bot-avatar.js";
 import { readAttachment } from "../attachments.js";
 import { arrivedRoute, automationsOffRoute, homeRoute } from "../cloud-send-arrived.js";
 import { moveFilesRoute } from "../cloud-send-files.js";
-import { moveBotParts, moveItems, moveKindsRoute } from "../cloud-send-kinds.js";
+import { automatedBot, moveBotParts, moveItems, moveKindsRoute } from "../cloud-send-kinds.js";
 import { cloudSendManifest } from "../cloud-send-manifest.js";
 import { moveMemoryRoute } from "../cloud-send-memory.js";
 import { cloudSendSummary, partHash } from "../cloud-send.js";
@@ -27,6 +27,7 @@ export function createCloudSendRoutes(deps) {
             return !tail.hasMore && tail.messages.length === 1 && tail.messages[0].role === "bot" && Boolean(tail.messages[0].text?.includes(name));
         },
         inRoom: (botId) => (deps.chats?.store.groups ?? []).some((group) => !group.dm && group.memberIds.includes(botId)),
+        automated: (botId) => Boolean(deps.move && automatedBot(deps.move, botId)),
         skills: deps.skills,
         picture: (avatarUrl) => botAvatarUrlSchema.safeParse(avatarUrl).success ? readAttachment(avatarUrl.slice("/api/attachments/".length))?.bytes ?? null : null,
         logins: () => deps.logins.changes(),
@@ -42,6 +43,7 @@ export function createCloudSendRoutes(deps) {
         const { req, res, path, method, url, json, readBody } = ctx;
         if (path !== "/api/cloud-send" && !path.startsWith("/api/cloud-send/"))
             return PASS;
+        const home = deps.cloudHome === true || deps.ownHome?.(ctx.auth) === true;
         const scoped = deps.scope?.(ctx.auth) ?? null;
         if (deps.refusal && !scoped) {
             req.resume();
@@ -57,7 +59,7 @@ export function createCloudSendRoutes(deps) {
             return;
         if (move && await moveFilesRoute({ dataDir: move.dataDir, bots: () => (bot ? move.store.bots.filter((entry) => entry.id === bot) : move.store.bots), owner: move.owner }, ctx))
             return;
-        if (move && deps.cloudHome && await arrivedRoute({ dataDir: move.dataDir, store: move.store, webhooks: move.webhooks, owner: move.owner }, ctx))
+        if (move && home && await arrivedRoute({ dataDir: move.dataDir, store: move.store, webhooks: move.webhooks, owner: move.owner, lineLanguage: deps.lineLanguage ?? (() => deps.config().language) }, ctx))
             return;
         if (move && deps.cloudHome && deps.automations && await automationsOffRoute({ automations: deps.automations, owner: move.owner }, ctx))
             return;
@@ -73,7 +75,7 @@ export function createCloudSendRoutes(deps) {
                 connections: deps.connections ?? (async () => []), heads: threadHeads, ...(move ? { kinds: move, teamMemory: move.teamMemory } : {}), ...(bot ? { bot } : {}) }));
         }
         if (path === "/api/cloud-send/verify-secrets") {
-            if (!deps.cloudHome || !deps.connectionFingerprints)
+            if (!home || !deps.connectionFingerprints)
                 return json(res, 404, { error: "not found" });
             if (method !== "POST")
                 return json(res, 405, { error: "method not allowed" });

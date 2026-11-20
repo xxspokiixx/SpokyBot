@@ -86,3 +86,15 @@ export function withoutSuperseded(text) {
     }
     return text.split("\n").filter((_, index) => !dropped.has(index)).join("\n");
 }
+/** Case, width, curly quotes and spacing aside, so a passage matches however the note was typed. */
+export function foldForMatch(text) {
+    return text.normalize("NFKC").toLowerCase().replace(/[‘’ʼ]/g, "'").replace(/[“”]/g, "\"").replace(/\s+/g, " ").trim();
+}
+/** Whether a note mentions `passage` as whole words ("IST" is not in "dentist"); null for a passage too short to name anything. */
+export function passageMatcher(passage) {
+    const folded = foldForMatch(passage);
+    if ((folded.match(/[\p{L}\p{N}]/gu)?.length ?? 0) < 3)
+        return null;
+    const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${folded.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "u");
+    return (text) => pattern.test(foldForMatch(text));
+}

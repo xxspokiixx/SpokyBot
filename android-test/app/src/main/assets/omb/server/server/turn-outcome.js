@@ -19,6 +19,11 @@ export class TurnStops {
             stop.handoffPath = event.handoffPath;
         else
             stop.error = error;
+        if (event.type === "runtime.error") {
+            const { setup, stalled, trialCredit, limitResetsAt, limit } = event;
+            if (setup || stalled || trialCredit || limitResetsAt || limit)
+                stop.flags = { setup, stalled, trialCredit, limitResetsAt, limit };
+        }
     }
     stopping(threadId, turnId, cause) {
         this.#turn(threadId, turnId).cause = cause;

@@ -18,6 +18,7 @@ const ENGINES = {
     hermesAgent: { resume: true },
     deepseekAgent: { resume: true },
     clineAgent: { resume: true },
+    copilotAgent: { resume: true },
     customAcp: { resume: true },
     "openai-compat": CHAT_ROW,
     grok: CHAT_ROW,
@@ -25,6 +26,7 @@ const ENGINES = {
     mistral: CHAT_ROW,
     cerebras: CHAT_ROW,
     groq: CHAT_ROW,
+    greenference: CHAT_ROW,
     meta: CHAT_ROW,
 };
 export function replaysTranscriptNatively(driverKind) {

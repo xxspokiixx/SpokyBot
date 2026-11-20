@@ -34,7 +34,7 @@ const fixture = vi.hoisted(() => {
 });
 
 // The panel's useState calls in source order, counted from `phase`; keep in step with ComputerPanel.tsx.
-const PHASE_OFFSETS = { phase: 0, resolved: 2, vmStatus: 10, error: 16 } as const;
+const PHASE_OFFSETS = { phase: 0, resolved: 2, vmStatus: 10, error: 17 } as const;
 let phaseIndex = -1;
 
 vi.mock("react", async (original) => ({

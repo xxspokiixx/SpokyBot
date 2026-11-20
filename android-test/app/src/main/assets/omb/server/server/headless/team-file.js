@@ -23,6 +23,7 @@ const enginesSchema = z.object({
     openrouter: keyOnly.optional(),
     xai: keyOnly.optional(),
     groq: keyOnly.optional(),
+    greenference: keyOnly.optional(),
     mistral: keyOnly.optional(),
     cerebras: keyOnly.optional(),
     openaiCompatible: z.object({ key: secret, baseUrl: z.union([url, secret]) }).strict().optional(),
@@ -68,7 +69,7 @@ const teamFileSchema = z.object({
     }).strict()).optional(),
 }).strict();
 const ENGINE_KIND = {
-    claude: "claude", openai: "openai", openrouter: "openrouter", xai: "xai", groq: "groq", mistral: "mistral", cerebras: "cerebras",
+    claude: "claude", openai: "openai", openrouter: "openrouter", xai: "xai", groq: "groq", greenference: "greenference", mistral: "mistral", cerebras: "cerebras",
     openaiCompatible: "openai-compatible",
 };
 export function everyTool(scope) {

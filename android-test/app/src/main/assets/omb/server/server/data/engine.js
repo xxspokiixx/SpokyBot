@@ -35,14 +35,6 @@ export function duckdbDirectory(env = process.env) {
 export function nativeRequire(directory = duckdbDirectory()) {
     return createRequire(directory ? join(directory, "node_modules", "openmausbot-duckdb-anchor.js") : import.meta.url);
 }
-/** The one mobile check: the node-bindings trees we ship have no android build of either binding, so requiring them there
- * is an ERR_DLOPEN_FAILED waiting to happen. `OMB_MOBILE=1` forces the same refusal on any platform. */
-export function mobileRefusal(platform = process.platform, env = process.env) {
-    if (platform === "android" || env.OMB_MOBILE === "1") {
-        return "DuckDB and resvg ship no native android build, so the data tools are unavailable; OMB_MOBILE=1 forces the same refusal on any platform.";
-    }
-    return null;
-}
 function loadBinding(directory) {
     return nativeRequire(directory)("@duckdb/node-api");
 }
@@ -693,9 +685,6 @@ class Engine {
     load() {
         if (this.loaded)
             return this.loaded;
-        const mobile = mobileRefusal(process.platform, this.env);
-        if (mobile)
-            return (this.loaded = { reason: mobile });
         const directory = duckdbDirectory(this.env);
         try {
             this.loaded = { binding: loadBinding(directory) };

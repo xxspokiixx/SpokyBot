@@ -8,6 +8,9 @@ const STOPPED_PREFIX = "stopped:";
 /** Activity name for a stopped turn. The word after the prefix is what a
  * phone that prints tool names shows; the desktop localizes it. */
 export const STOPPED_TURN_NAME = `${STOPPED_PREFIX} Stopped`;
+/** Activity name for a turn the person ended with Stop: the words after the
+ * prefix are what a phone shows; the desktop says it in the reader's language. */
+export const PERSON_STOPPED_TURN_NAME = `${STOPPED_PREFIX} You stopped this.`;
 export function isStoppedTurnName(name) {
     return name.startsWith(STOPPED_PREFIX);
 }

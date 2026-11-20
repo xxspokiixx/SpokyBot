@@ -1,5 +1,21 @@
 // The agents tools' only way to the harness: loopback /api/internal/* with this turn's capability token;
 // the harness authenticates and scopes every call.
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
+/** Node's fetch (undici 7.29 in Electron 43) fails a call after 300 s without response headers, whatever its signal
+ * allows; node:http waits as long as the harness works, such as a lent computer's command of up to 900 s. */
+function send(url, init) {
+    return new Promise((resolve, reject) => {
+        const request = (url.protocol === "https:" ? httpsRequest : httpRequest)(url, { method: init.method ?? "GET", headers: init.headers, signal: init.signal }, (response) => {
+            const chunks = [];
+            response.on("data", (chunk) => chunks.push(chunk));
+            response.on("end", () => resolve({ status: response.statusCode ?? 0, text: Buffer.concat(chunks).toString("utf8") }));
+            response.on("error", reject);
+        });
+        request.on("error", reject);
+        request.end(init.body);
+    });
+}
 export function createHarnessClient(baseUrl, token) {
     async function api(path, init) {
         const { ok, status, body } = await apiResponse(path, init);
@@ -7,13 +23,17 @@ export function createHarnessClient(baseUrl, token) {
             throw new Error(String(body.error ?? `HTTP ${status}`));
         return body;
     }
-    async function apiResponse(path, init) {
-        const res = await fetch(baseUrl + path, {
+    async function apiResponse(path, init = {}) {
+        const { status, text } = await send(new URL(baseUrl + path), {
             ...init,
-            headers: { "content-type": "application/json", authorization: `Bearer ${token}`, ...init?.headers },
+            headers: { "content-type": "application/json", authorization: `Bearer ${token}`, ...init.headers },
         });
-        const body = (await res.json().catch(() => ({})));
-        return { ok: res.ok, status: res.status, body };
+        let body = {};
+        try {
+            body = JSON.parse(text);
+        }
+        catch { }
+        return { ok: status >= 200 && status < 300, status, body };
     }
     return { api, apiResponse };
 }

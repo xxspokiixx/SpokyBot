@@ -10,14 +10,7 @@ const PREFIX = "/api/workspace-backup";
 const MAX_UPLOAD_BYTES = MAX_WORKSPACE_BACKUP_UPLOAD_BYTES;
 const MAX_CLIENT_STATE_BYTES = 2 * 1024 ** 2;
 const EXPIRES_MS = 60 * 60_000;
-const passwordSchema = z.string().min(1, "Enter a backup password.").max(1024);
-const selectionSchema = z.object({
-    history: z.boolean().default(true),
-    skills: z.boolean().default(true),
-    automations: z.boolean().default(true),
-    savedLogins: z.boolean().default(true),
-    apiKeys: z.boolean().default(true),
-}).optional().default({ history: true, skills: true, automations: true, savedLogins: true, apiKeys: true });
+const passwordSchema = z.string().min(1, "Use a password of at least 1 character.").max(1024);
 const failure = (message, status = 400) => Object.assign(new Error(message), { status });
 export function isWorkspaceBackupSessionControl(method, path) {
     return (method === "GET" && path === "/api/auth/sessions") ||
@@ -142,7 +135,7 @@ export function createWorkspaceBackupRoutes(options) {
                 return true;
             }
             if (method === "POST" && path === `${PREFIX}/export`) {
-                const body = z.object({ password: passwordSchema, clientState: z.record(z.string(), z.string()).default({}), selection: selectionSchema }).parse(await options.readBody(req, MAX_CLIENT_STATE_BYTES + 8 * 1024));
+                const body = z.object({ password: passwordSchema, clientState: z.record(z.string(), z.string()).default({}), categories: z.array(z.string()).optional() }).parse(await options.readBody(req, MAX_CLIENT_STATE_BYTES + 8 * 1024));
                 if (Buffer.byteLength(JSON.stringify(body.clientState)) > MAX_CLIENT_STATE_BYTES)
                     throw failure("Saved drafts exceed the 2 MB backup preference limit.", 413);
                 const clientState = Object.fromEntries(Object.entries(body.clientState).filter(([key]) => WORKSPACE_BACKUP_CLIENT_KEYS.includes(key)));
@@ -151,7 +144,7 @@ export function createWorkspaceBackupRoutes(options) {
                     replacePrevious(auth, ["download"]);
                     if (artifacts.size >= 4)
                         throw failure("There are already four backup files in progress. Restart or wait an hour before creating another.", 409);
-                    return createWorkspaceBackup(options.dataDir, { password: body.password, clientState, selection: body.selection, appVersion: options.appVersion });
+                    return createWorkspaceBackup(options.dataDir, { password: body.password, clientState, appVersion: options.appVersion, categories: body.categories });
                 }));
                 try {
                     check(req, auth);
@@ -239,11 +232,11 @@ export function createWorkspaceBackupRoutes(options) {
                 return true;
             }
             if (method === "POST" && path === `${PREFIX}/restore`) {
-                const body = z.object({ id: z.string().uuid(), confirmation: z.literal("REPLACE") }).parse(await options.readBody(req));
+                const body = z.object({ id: z.string().uuid(), confirmation: z.literal("REPLACE"), categories: z.array(z.string()).optional() }).parse(await options.readBody(req));
                 get(body.id, auth, "staged");
                 const result = await operate(() => options.exclusive(async () => {
                     check(req, auth);
-                    return commitPendingWorkspaceRestore(options.dataDir, body.id);
+                    return commitPendingWorkspaceRestore(options.dataDir, body.id, body.categories);
                 }, true));
                 artifacts.delete(body.id);
                 json(res, 200, { ...result, restoreId: body.id });

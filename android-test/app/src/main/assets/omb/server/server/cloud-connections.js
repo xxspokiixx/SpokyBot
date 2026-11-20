@@ -26,6 +26,7 @@ export const KEY_PROVIDERS = [
     { id: "mistral", label: "Mistral", for: ["mistral"], config: keyed("mistral") },
     { id: "cerebras", label: "Cerebras", for: ["cerebras"], config: keyed("cerebras") },
     { id: "groq", label: "Groq", for: ["groq"], config: keyedUrl("groq") },
+    { id: "greenference", label: "Greenference", for: ["greenference"], config: keyed("greenference") },
     { id: "meta", label: "Meta", for: ["meta"], config: keyedUrl("meta") },
     { id: "openaiCompat", label: "OpenAI-compatible", for: ["openaiCompat"], config: (cfg) => cfg.openaiCompat?.key
             ? { openaiCompat: Object.fromEntries(Object.entries(cfg.openaiCompat).filter(([, value]) => typeof value === "string" && value)) } : null },

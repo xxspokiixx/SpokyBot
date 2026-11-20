@@ -1,3 +1,4 @@
+import { agentsCallIdentities } from "./agents-tool-names.js";
 const SERVER_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
 // Selectors must never contain protocol control characters.
 // eslint-disable-next-line no-control-regex
@@ -55,21 +56,27 @@ export function parseToolScope(value) {
     }
     return { ok: true, scope };
 }
-function matches(selector, tool) {
+function matches(selector, tool, names = [tool.name]) {
     const selected = selectorIdentity(selector);
     return selected?.kind === tool.kind
         && (selected.kind !== "mcp" || (tool.kind === "mcp" && selected.server === tool.server))
-        && (selected.name === "*" || selected.name === tool.name);
+        && (selected.name === "*" || names.includes(selected.name));
 }
-function permits(scope, tool) {
+function permitsNamed(scope, tool, names) {
+    return (scope?.allow === undefined || scope.allow.some((selector) => matches(selector, tool, names)))
+        && !scope?.deny?.some((selector) => matches(selector, tool, names));
+}
+function permits(scope, tool, args) {
     if (!validName(tool.name) || (tool.kind === "mcp" && !SERVER_NAME.test(tool.server)))
         return false;
-    return (scope?.allow === undefined || scope.allow.some((selector) => matches(selector, tool)))
-        && !scope?.deny?.some((selector) => matches(selector, tool));
+    // An agents call is named by what it does: a selector naming one action's own tool name allows or refuses that action.
+    const named = tool.kind === "mcp" && tool.server === "agents" ? agentsCallIdentities(tool.name, args) : [[tool.name]];
+    return named.some((names) => permitsNamed(scope, tool, names));
 }
-export function allowsTool(scope, tool) {
+/** Whether the selection lets this tool run: with the call's arguments, this call; without them, any call it makes. */
+export function allowsTool(scope, tool, args) {
     const parsed = parseToolScope(scope);
-    return parsed.ok && permits(parsed.scope, tool);
+    return parsed.ok && permits(parsed.scope, tool, args);
 }
 /** Whether an engine needs a native catalog contract, in addition to MCP gates. */
 export function narrowsNativeTools(value) {

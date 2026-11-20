@@ -7,7 +7,7 @@ import { fitPage, pageLimit } from "./chrome/flags.js";
 import { launchChrome } from "./chrome/launch.js";
 import { clearSingleton, staleSingletonLock } from "./chrome/processes.js";
 import { languageList } from "./chrome/wrapper.js";
-import { downgradeRefusal, ensureProfile, forgetOpenTabs, markCleanExit, profileHash, recordOpenedBy, versionOf, workspaceId } from "./chrome/profile.js";
+import { downgradeRefusal, ensureProfile, forgetOpenTabs, markCleanExit, profileDir, profileHash, recordOpenedBy, versionOf, workspaceId } from "./chrome/profile.js";
 const LOCAL_CAPS = { persistentProfile: true, window: true, egressGate: true, identityOverride: true, ownsAllTabs: true, downloads: "local", uploads: "path", botPasskeys: true };
 /** A Chrome SpokyBot launches on a profile folder of its own, driven over its DevTools pipe. */
 export class LocalBackend {
@@ -20,6 +20,16 @@ export class LocalBackend {
     async open(request) {
         const options = this.#options;
         const platform = options.platform ?? process.platform;
+        const release = options.registry?.reserve(profileDir(options.dataDir, request.key));
+        try {
+            return await this.#open(request, platform);
+        }
+        finally {
+            release?.();
+        }
+    }
+    async #open(request, platform) {
+        const options = this.#options;
         const binary = await options.binary();
         const { dir, record, created } = ensureProfile(options.dataDir, request.key, { acceptLanguages: options.acceptLanguages?.() ?? "en-US,en" });
         const binaryVersion = versionOf(binary.identity.product);

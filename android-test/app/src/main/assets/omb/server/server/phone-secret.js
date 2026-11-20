@@ -1,5 +1,5 @@
 import { createECDH, createHash } from "node:crypto";
-import { Aes256Gcm, CipherSuite, DhkemP256HkdfSha256, HkdfSha256, } from "@hpke/core";
+import { desktopCredentialSlot, isCredentialTargetId } from "../shared/credential-request.js";
 export const PHONE_SECRET_PROTOCOL_VERSION = 1;
 export const PHONE_SECRET_INFO = "SpokyBot phone credential v1";
 export const PHONE_SECRET_MAX_BYTES = 4_096;
@@ -14,11 +14,12 @@ export class PhoneSecretError extends Error {
         this.status = status;
     }
 }
-const suite = new CipherSuite({
+let hpkeSuite;
+const suite = () => hpkeSuite ??= import("@hpke/core").then(({ Aes256Gcm, CipherSuite, DhkemP256HkdfSha256, HkdfSha256 }) => new CipherSuite({
     kem: new DhkemP256HkdfSha256(),
     kdf: new HkdfSha256(),
     aead: new Aes256Gcm(),
-});
+}));
 const INFO = new TextEncoder().encode(PHONE_SECRET_INFO);
 const decodeBase64URL = (value, expectedBytes) => {
     if (typeof value !== "string" || !BASE64URL.test(value))
@@ -82,6 +83,10 @@ export function assertPhoneSecretRequestMatches(context, authenticatedDeviceId, 
     // Phone entry hands a key to the desktop's settings; the 1Password token goes to Logins, which a phone cannot reach.
     if (expected.target === "onePasswordToken") {
         throw new PhoneSecretError("Paste the 1Password token in SpokyBot on your computer, or in My Cloud: a phone cannot save it yet.", 409);
+    }
+    // An AI provider key lives in the server's settings, which only the computer's own app writes.
+    if (isCredentialTargetId(expected.target) && !desktopCredentialSlot(expected.target)) {
+        throw new PhoneSecretError("Paste this key in SpokyBot on your computer, or in My Cloud: a phone cannot save it yet.", 409);
     }
     if (context.deviceId !== authenticatedDeviceId ||
         context.target !== expected.target ||
@@ -190,7 +195,7 @@ async function importIdentity(message) {
     catch {
         throw new PhoneSecretError("The desktop credential key is invalid", 503);
     }
-    const imported = await suite.kem.importKey("jwk", {
+    const imported = await (await suite()).kem.importKey("jwk", {
         kty: "EC",
         crv: "P-256",
         x: privateKey.x,
@@ -257,18 +262,25 @@ export class PhoneSecretBridge {
         return true;
     }
     async provide(context) {
+        await this.withinLimit(async () => this.save(context, await this.openWithinLimit(context)));
+    }
+    /** The value a paired phone sealed for this computer, for a secret this server keeps itself and never sends on. */
+    async open(context) {
+        return this.withinLimit(() => this.openWithinLimit(context));
+    }
+    async withinLimit(work) {
         if (this.active >= this.maximumPending) {
             throw new PhoneSecretError("Another secure credential is still being saved. Try again.", 429);
         }
         this.active += 1;
         try {
-            await this.provideWithinLimit(context);
+            return await work();
         }
         finally {
             this.active -= 1;
         }
     }
-    async provideWithinLimit(context) {
+    async openWithinLimit(context) {
         if (!this.identity) {
             throw new PhoneSecretError("Secure phone entry is not ready on this computer. Reopen SpokyBot and try again.", 503);
         }
@@ -288,7 +300,7 @@ export class PhoneSecretBridge {
         }
         let opened;
         try {
-            opened = await suite.open({ recipientKey: identity.privateKey, enc: encapsulatedKey, info: INFO }, ciphertext, phoneSecretAAD(context));
+            opened = await (await suite()).open({ recipientKey: identity.privateKey, enc: encapsulatedKey, info: INFO }, ciphertext, phoneSecretAAD(context));
         }
         catch {
             throw new PhoneSecretError("The encrypted credential could not be verified");
@@ -307,6 +319,9 @@ export class PhoneSecretBridge {
         if (!value || Buffer.byteLength(value) > PHONE_SECRET_MAX_BYTES) {
             throw new PhoneSecretError("The credential must be between 1 and 4096 bytes");
         }
+        return value;
+    }
+    async save(context, value) {
         const requestId = phoneSecretOperationId(context);
         await new Promise((resolve, reject) => {
             const timer = setTimeout(() => {

@@ -3,6 +3,8 @@ import { cancelChannelMessage, queuedChannelMessage, queueChannelMessage } from 
 import { acceptedSendMatch, sendFingerprint } from "./send-idempotency.js";
 import { cancelSteeredMessage, queuedSteeredMessage } from "./steer-queue.js";
 const conflict = (message) => Object.assign(new Error(message), { status: 409 });
+/** A bot answered the question: the person's own answer still replaces it. */
+const decidedByBot = (card) => card.answeredBy?.kind === "bot";
 export function createPersonReplies(deps) {
     const { store, sendSequencer } = deps;
     function room(threadId) {
@@ -79,12 +81,13 @@ export function createPersonReplies(deps) {
             sendId: `late-question-${createHash("sha256").update(`${threadId}:${requestId}`).digest("hex").slice(0, 32)}`,
             refusal: () => {
                 const card = latestCard();
-                return !card || card.answered || card.dismissed ? "this question has already been answered" : null;
+                return !card || (card.answered && !decidedByBot(card)) || card.dismissed ? "this question has already been answered" : null;
             },
         });
         const latest = latestCard();
-        if (latest && !latest.answered && !latest.dismissed) {
-            store.patchMessage(threadId, cardMessage.id, { card: { ...latest, answered: "answer", answeredText: answer, dismissed: false } });
+        if (latest && (!latest.answered || decidedByBot(latest)) && !latest.dismissed) {
+            const { answeredBy: _decider, ...card } = latest;
+            store.patchMessage(threadId, cardMessage.id, { card: { ...card, answered: "answer", answeredText: answer, dismissed: false } });
         }
         return receipt;
     }

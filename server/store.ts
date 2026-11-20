@@ -11,6 +11,7 @@ import type { TeamComputers } from "./team-computers.ts";
 import { removeBotFolder, soulFile, soulHash, writeSoulMirror } from "./bot-folder.ts";
 import type { BotProfilePatch } from "./bot-profile.ts";
 import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
+import { rewriteGrantLists } from "./always-allow.ts";
 import { DATA_DIR, EVENTS_DIR, NATIVE_DIR, loadBrowserProfileIdAliases } from "./config.ts";
 import * as mdb from "./message-db.ts";
 import { forgetBotMemoryJournal, journalFile } from "./memory-journal.ts";
@@ -1564,6 +1565,14 @@ export class Store {
     } else this.saveBots();
     this.emit({ type: "bot", botId: id });
     return bot;
+  }
+
+  /** Rewrites a bot's own "Always allow" list and each of its threads' in one save (server/always-allow.ts owns the
+   * rule). `removal`: a failed save keeps the change in force, since the person asked for less access, not more. */
+  rewriteGrants(botId: string, rewrite: (keys: readonly string[]) => string[] | null, removal = false): boolean {
+    const bot = this.bot(botId);
+    if (!bot) return false;
+    return rewriteGrantLists(bot, rewrite, () => this.saveBots(), removal);
   }
 
   clearVoiceSelections(): BotRecord[] {

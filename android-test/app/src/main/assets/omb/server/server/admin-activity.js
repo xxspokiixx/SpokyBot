@@ -1,6 +1,7 @@
 // Who changed what on this server: one NDJSON file per UTC month under <data>/admin-activity, 0600, pruned by the decision
 // log's retention window. Values are redacted (credential-named keys and every headers/env value become "[hidden]") and
 // nothing is sent anywhere. Fire-and-forget: a full disk must not undo a setting that already took effect.
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { basename, join } from "node:path";
@@ -201,17 +202,24 @@ export const BOT_AUDIT_FIELDS = [
     "cwd", "composio", "browser", "browserProfile", "mcpServers", "chiefOfStaff", "managedSections", "section",
     "parkDirectMessages", "hidden", "modelSelection", "helperModel", "visibility",
 ];
-export function botAuditSnapshot(bot) {
+/** A Team Cloud's bots are everyone's: who renamed one, recoloured it or changed its instructions is recorded too. */
+export const TEAM_BOT_AUDIT_FIELDS = [...BOT_AUDIT_FIELDS, "name", "title", "description", "soul", "color"];
+export function botAuditSnapshot(bot, fields = BOT_AUDIT_FIELDS) {
     if (!bot)
         return null;
     // "everyone" and no field are one audience.
     const present = (field) => bot[field] !== undefined && !(field === "visibility" && bot[field] === "everyone");
-    return Object.fromEntries(BOT_AUDIT_FIELDS.filter(present).map((field) => [field, structuredClone(bot[field])]));
+    return Object.fromEntries(fields.filter(present).map((field) => [field, field === "soul" ? textDigest(bot[field]) : structuredClone(bot[field])]));
 }
-export function botChangeRows(target, before, after, only) {
+/** Instructions may hold anything a person typed: the log keeps only that they changed. */
+function textDigest(value) {
+    const text = String(value);
+    return { length: text.length, sha256: createHash("sha256").update(text).digest("hex").slice(0, 12) };
+}
+export function botChangeRows(target, before, after, only, fields = BOT_AUDIT_FIELDS) {
     if (!before || !after)
         return [];
-    const changed = BOT_AUDIT_FIELDS.filter((field) => (!only || only.includes(field)) && stable(before[field]) !== stable(after[field]));
+    const changed = fields.filter((field) => (!only || only.includes(field)) && stable(before[field]) !== stable(after[field]));
     const rows = [];
     const bot = { kind: "bot", id: target.id, ...(target.name ? { name: target.name } : {}) };
     if (changed.includes("visibility")) {

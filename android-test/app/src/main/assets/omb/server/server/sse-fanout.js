@@ -3,11 +3,7 @@ export const SSE_MAX_BUFFERED_BYTES = 4 * 1024 * 1024;
 /** Only screen captures are skipped while backpressured; durable events are always written, or the client is disconnected to replay them. */
 export function deliverSseFrame(client, kind, frame) {
     if (client.res.writableLength > SSE_MAX_BUFFERED_BYTES) {
-        try {
-            client.res.end();
-        }
-        catch {
-        }
+        client.close();
         return "disconnected";
     }
     if (client.backpressured && kind === "screen")
@@ -25,4 +21,31 @@ export function deliverSseFrame(client, kind, frame) {
     catch {
         return "disconnected";
     }
+}
+const SSE_HEARTBEAT_FRAME = `: keepalive\n\ndata: ${JSON.stringify({ kind: "ping" })}\n\n`;
+/** Heartbeats `res` while `live()` holds. The returned close stops the heartbeat and runs `onClose` once, before the response ends; it runs by itself when the stream ends, errors or stops being live. */
+export function openSseHeartbeat(res, options) {
+    let open = true;
+    const close = () => {
+        if (!open)
+            return;
+        open = false;
+        clearInterval(timer);
+        options.onClose();
+        if (!res.writableEnded && !res.destroyed)
+            res.end();
+    };
+    const timer = setInterval(() => {
+        if (res.writableEnded || res.destroyed || !options.live())
+            return close();
+        try {
+            res.write(SSE_HEARTBEAT_FRAME);
+        }
+        catch {
+            close();
+        }
+    }, options.everyMs);
+    // Node reports a failed write, such as one after end, as an asynchronous 'error' event on the response; unhandled, it exits the process.
+    res.on("error", close);
+    return close;
 }

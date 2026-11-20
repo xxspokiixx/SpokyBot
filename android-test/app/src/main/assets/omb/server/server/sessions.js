@@ -130,6 +130,7 @@ export class SessionRegistry {
     openMarker;
     closed = false;
     adminOnly = null;
+    membershipCheckedAt = -Infinity;
     // No parameter properties: Node's strip-only TypeScript mode only erases types.
     constructor(options) {
         this.options = options;
@@ -198,7 +199,7 @@ export class SessionRegistry {
         }
     }
     prune() {
-        this.revalidateEmailSessions();
+        this.recheckMembership();
         const now = this.now();
         this.pairings = this.pairings.filter((p) => p.expiresAt > now);
         this.replays = this.replays.filter((r) => r.expiresAt > now);
@@ -450,10 +451,21 @@ export class SessionRegistry {
     clearFailures(source) {
         this.failures.delete(source);
     }
+    /** The sign-in lists may have changed: the next recheckMembership() reads them. */
+    membershipChanged() {
+        this.membershipCheckedAt = -Infinity;
+    }
+    /** revalidateEmailSessions(), unless one ran within `recheckMs` and membershipChanged() has not been called since. */
+    recheckMembership() {
+        if (this.now() - this.membershipCheckedAt < (this.options.recheckMs ?? 0))
+            return;
+        this.revalidateEmailSessions();
+    }
     /** Email membership is live: losing any scope revokes the token and its streams; promotions never widen existing credentials. */
     revalidateEmailSessions() {
         if (this.closed)
             throw new Error("Session registry is closed.");
+        this.membershipCheckedAt = this.now();
         // A team session's membership is the Admin's signed claim, checked at each pairing (cloud-team.ts), never the sign-in list.
         const eligible = this.sessions.filter(session => session.email !== undefined && session.membershipAuthority !== "team" && !(this.options.portalMembership && session.membershipAuthority === "portal"));
         if (!eligible.length)
@@ -492,7 +504,7 @@ export class SessionRegistry {
     authenticate(token) {
         if (!token)
             return null;
-        this.revalidateEmailSessions();
+        this.recheckMembership();
         const hash = sha256(token);
         const now = this.now();
         const record = this.sessions.find((s) => sameDigest(s.tokenHash, hash));
@@ -508,7 +520,7 @@ export class SessionRegistry {
     }
     /** Call only after origin and scope checks pass; never revives an expired session. */
     renew(sessionId) {
-        this.revalidateEmailSessions();
+        this.recheckMembership();
         const record = this.sessions.find((s) => s.id === sessionId);
         const now = this.now();
         if (!record || record.expiresAt <= now)
@@ -538,12 +550,18 @@ export class SessionRegistry {
         this.prune();
         return this.sessions.filter((s) => s.membershipAuthority === "team" && s.memberCheckedAt !== undefined).map(publicSession);
     }
+    /** Every code a member made for a phone stops working, and every phone such a code opened signs out. Never an Admin-signed pairing (an app). */
+    closeMemberPhones() {
+        this.pairings = this.pairings.filter((pairing) => !(pairing.member && pairing.memberCheckedAt !== undefined));
+        return this.memberPhones().filter((phone) => this.revoke(phone.id)).length;
+    }
     /** A person who left a Team Cloud: every session of theirs (app windows, phones) ends now, and no open code of theirs
-     * can open another. Returns how many sessions ended. */
-    revokeMember(email) {
+     * can open another. With `keepRole` (the Admin vouched for them at that role), only those at another role end. Returns
+     * how many sessions ended. */
+    revokeMember(email, keepRole) {
         const address = email.trim().toLowerCase();
-        this.pairings = this.pairings.filter((pairing) => pairing.member?.email.toLowerCase() !== address);
-        const ended = this.sessions.filter((session) => session.membershipAuthority === "team" && session.email?.toLowerCase() === address);
+        this.pairings = this.pairings.filter((pairing) => pairing.member?.email.toLowerCase() !== address || pairing.member.role === keepRole);
+        const ended = this.sessions.filter((session) => session.membershipAuthority === "team" && session.email?.toLowerCase() === address && (keepRole === undefined || session.teamRole !== keepRole));
         for (const session of ended)
             this.revoke(session.id);
         return ended.length;

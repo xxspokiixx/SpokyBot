@@ -1,14 +1,83 @@
 import { failedTurnTool } from "../../shared/failed-turn.js";
 import { admit } from "../admission.js";
+import { memoryStopped } from "../engine-memory.js";
 import { ESCALATIONS_THREAD_TITLE, EscalationLedger, escalationChip, escalationDeliverable, escalationText } from "../escalations.js";
-import { chiefForBot, INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, incidentContext, incidentText } from "../incidents.js";
+import { AUTO_RETRY_LEAD, chiefForBot, INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, incidentContext, incidentText, RETRY_BLOCKED, RETRY_LEAD, } from "../incidents.js";
 import { buildNotification } from "../notify.js";
+import { quoteInNote } from "../peer-provenance.js";
+import { peerName } from "../peer-roster.js";
 import { redactSecretsInText } from "../redact.js";
+import { retriesTeammateThread } from "../routine-recovery.js";
 import { queueSteeredMessage } from "../steer-queue.js";
+/** How long a run stopped for memory waits before it starts again; the memory gate then holds it until there is room. */
+export const MEMORY_RETRY_MS = 30_000;
+export const MEMORY_RETRY_TEXT = "[SpokyBot started this again by itself, once: the last run was stopped to free memory on this Cloud. "
+    + "Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]";
 export function createChiefNotices(deps) {
     const { store } = deps;
     const incidentLedger = new IncidentLedger();
     const escalationLedger = new EscalationLedger();
+    const schedule = deps.schedule ?? ((run) => { setTimeout(run, 0).unref?.(); });
+    const later = deps.later ?? ((run, ms) => { setTimeout(run, ms).unref?.(); });
+    /** Each thread's last request a run stopped for memory was started again for: once a request. */
+    const roomRetries = new Map();
+    /** A run stopped for memory that no Chief retries starts once more by itself; the person hears only if that one fails too,
+     * or can't start. Never a run whose thread someone wrote in since, or that is running or queued again. */
+    function retryForRoom(bot, threadId, report) {
+        const continueRequest = deps.continueRequest;
+        if (!continueRequest)
+            return false;
+        const asked = store.activePath(threadId).findLast((line) => line.role === "user")?.id ?? "";
+        if (roomRetries.get(threadId) === asked) {
+            report({ retried: true });
+            return true;
+        }
+        roomRetries.set(threadId, asked);
+        if (roomRetries.size > 500)
+            roomRetries.delete(roomRetries.keys().next().value);
+        const failedAt = Date.now();
+        later(() => {
+            if (!store.bot(bot.id) || !store.taskByThread(bot.id, threadId))
+                return;
+            if (store.activePath(threadId).some((line) => line.role === "user" && line.at > failedAt))
+                return;
+            if (deps.threadBusy(bot.id, threadId) || deps.threadQueued?.(bot.id, threadId))
+                return;
+            continueRequest(bot.id, threadId, MEMORY_RETRY_TEXT)
+                .catch((error) => report({ notRetried: `its retry could not start (${error instanceof Error ? error.message : String(error)})` }));
+        }, MEMORY_RETRY_MS);
+        return true;
+    }
+    /** Why a teammate's stopped thread cannot be retried now, in words a Chief can act on, or null. */
+    function retryRefusal(botId, threadId) {
+        const blocked = deps.threadBusy(botId, threadId) ? (deps.threadSettling?.(threadId) ? "settling" : "running")
+            : deps.threadQueued?.(botId, threadId) ? "queued" : null;
+        if (blocked)
+            return RETRY_BLOCKED[blocked];
+        // A thread that finished a run since it was last reported has nothing to resume: resuming would redo finished work.
+        const reportedAt = incidentLedger.lastAt(threadId);
+        if (reportedAt !== undefined && store.activePath(threadId).some((line) => line.turnSucceeded === true && line.at > reportedAt)) {
+            return "that thread has finished a run since it was reported — there is nothing to retry; read what it did before deciding anything else";
+        }
+        return null;
+    }
+    /** The one way a teammate's stopped thread runs again: a Chief's retry_thread and SpokyBot's automatic retry both
+     * start it here, after the same refusal checks. Throws the refusal, or why the start failed. */
+    async function retryThread(input) {
+        const refused = retryRefusal(input.bot.id, input.threadId);
+        if (refused)
+            throw new Error(refused);
+        const chief = peerName(input.chief.name);
+        const lead = input.automatic
+            ? `${AUTO_RETRY_LEAD}, once, before telling ${chief}, your Chief of Staff, that this thread's last run failed.`
+            : `${RETRY_LEAD}${chief}, your Chief of Staff, after this thread's last run stopped.${input.note ? ` Note from ${chief}: ${quoteInNote(input.note, 300)}` : ""}`;
+        await deps.startTurn(input.bot.id, `${lead} Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]`, { threadId: input.threadId, unattended: input.unattended, peerAsk: { botId: input.chief.id, name: input.chief.name, ...(input.unattended ? { unattended: true } : {}) } });
+    }
+    /** A notice about this thread may go to `chief`: its asks are the Chief's person's, never another person's private chat. */
+    function reachesChief(chief, bot, threadId) {
+        const routing = deps.routing;
+        return routing ? routing.askedPerson(bot.id, threadId) === routing.personOf(chief) : deps.privateThread?.(threadId) !== true;
+    }
     function incidentRefused(chief, incidentsThreadId, asks, why) {
         const refused = `the incident could not reach ${chief.name} — ${why}`;
         store.appendMessage(incidentsThreadId, { role: "bot", kind: "activity", tool: failedTurnTool(refused) });
@@ -41,12 +110,17 @@ export function createChiefNotices(deps) {
             }
             return "person";
         };
-        if (!chief || deps.privateThread?.(threadId))
+        const routing = deps.routing;
+        const person = chief && routing ? routing.personOf(chief) : null;
+        if (!chief || !reachesChief(chief, bot, threadId))
             return tellThePerson();
-        const notices = store.tasks(chief.id).find((candidate) => candidate.title === input.title && !candidate.archivedAt)
+        const notices = store.tasks(chief.id).find((candidate) => candidate.title === input.title && !candidate.archivedAt &&
+            (!routing || routing.startedBy(candidate.threadId) === (person ?? undefined)))
             ?? store.createTask(chief.id, input.title, false, undefined, { botId: chief.id, name: chief.name, at: Date.now() });
         if (!notices || notices.threadId === threadId)
             return tellThePerson();
+        if (routing && person && routing.startedBy(notices.threadId) === undefined)
+            routing.open(notices.threadId, person);
         store.appendMessage(notices.threadId, {
             role: "bot",
             kind: "activity",
@@ -69,6 +143,10 @@ export function createChiefNotices(deps) {
         });
         return "chief";
     }
+    /** A failed teammate run gets one retry from SpokyBot before its Chief hears; the Chief then hears how that retry ended.
+     * Never retried: a stall the turn watchdog stopped (kind "stalled"), a stop, a refusal or a cap (retriesTeammateThread,
+     * from the failure's words and `facts`), a run that answered a retry, and a thread whose asks are not the Chief's person's. */
+    /** `notified`: the person already heard of it another way (a usage limit's own notice), so only the Chief is told. */
     function reportIncident(input) {
         const { bot, threadId } = input;
         if (deps.quietThread?.(bot.id, threadId))
@@ -89,10 +167,30 @@ export function createChiefNotices(deps) {
         const count = incidentLedger.note(threadId);
         if (count.muted)
             return;
-        deliver({
-            chief: chiefForBot(store.bots, bot), title: INCIDENTS_THREAD_TITLE, bot, threadId,
-            chip: incidentChip(incident), text: incidentText(incident, count),
-            alreadyNotified: input.kind === "could-not-start" || input.kind === "routine-failed",
+        const chief = chiefForBot(store.bots, bot);
+        const report = (retry) => void deliver({
+            chief, title: INCIDENTS_THREAD_TITLE, bot, threadId,
+            chip: incidentChip(incident, deps.threadLanguage?.(threadId)), text: incidentText(incident, count, retry),
+            alreadyNotified: input.notified === true || input.kind === "could-not-start" || input.kind === "routine-failed",
+        });
+        const chiefRetries = Boolean(chief && !group && reachesChief(chief, bot, threadId));
+        if (input.kind === "failed" && !group && !chiefRetries && memoryStopped(input.detail) && retryForRoom(bot, threadId, report))
+            return;
+        if (!chief || !chiefRetries)
+            return report();
+        const answered = store.activePath(threadId).findLast((line) => line.role === "user")?.text ?? "";
+        if (answered.startsWith(AUTO_RETRY_LEAD))
+            return report({ retried: true });
+        if (input.kind !== "failed" || answered.startsWith(RETRY_LEAD) || !count.mayRetry || !retriesTeammateThread(input.detail, input.facts))
+            return report();
+        const failedAt = Date.now();
+        schedule(() => {
+            if (!store.bot(bot.id) || !store.taskByThread(bot.id, threadId))
+                return;
+            if (store.activePath(threadId).some((line) => line.role === "user" && line.at > failedAt))
+                return report({ notRetried: "someone wrote in that thread since" });
+            retryThread({ chief, bot, threadId, unattended: true, automatic: true })
+                .catch((error) => report({ notRetried: `its retry could not start (${error instanceof Error ? error.message : String(error)})` }));
         });
     }
     // Advisory: a delivery fault is logged and never reaches the gate, the turn fold or the caller's own outcome.
@@ -130,5 +228,5 @@ export function createChiefNotices(deps) {
             return "failed";
         }
     }
-    return { reportIncident, reportEscalation, incidentRefused, incidentLastAt: (threadId) => incidentLedger.lastAt(threadId) };
+    return { reportIncident, reportEscalation, incidentRefused, retryRefusal, retryThread };
 }

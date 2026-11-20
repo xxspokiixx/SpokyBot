@@ -20,12 +20,15 @@ export function stallLimitMs(raw: string | undefined, fallback: number): number 
 
 const parked = (turn: WatchedTurn): boolean => turn.waitingOnHuman || turn.waitingOnComputer;
 
+/** Why a turn was stopped: it went silent, or an error nothing caught killed its own work (server/crash-guard.ts). */
+export type StallReason = "silent" | "server-error";
+
 export interface TurnWatchdogOptions {
   stallMs: number;
   toolStallMs: number;
   checkMs: number;
   /** silentMs: the silence that stopped the turn, stallMs or toolStallMs. */
-  onStall: (turn: WatchedTurn, silentMs: number) => void;
+  onStall: (turn: WatchedTurn, silentMs: number, reason: StallReason) => void;
   now?: () => number;
 }
 
@@ -117,7 +120,16 @@ export class TurnWatchdog {
       const silentMs = turn.runningTools.size > 0 ? Math.max(this.opts.stallMs, this.opts.toolStallMs) : this.opts.stallMs;
       if (at - turn.lastEventAt < silentMs) continue;
       this.turns.delete(turn.threadId);
-      this.opts.onStall(turn, silentMs);
+      this.opts.onStall(turn, silentMs, "silent");
     }
+  }
+
+  /** Stops a watched turn now, as a stall would (server/crash-guard.ts: an error in the turn's own work). */
+  fail(threadId: string, reason: StallReason = "server-error"): boolean {
+    const turn = this.turns.get(threadId);
+    if (!turn) return false;
+    this.turns.delete(threadId);
+    this.opts.onStall(turn, this.now() - turn.lastEventAt, reason);
+    return true;
   }
 }

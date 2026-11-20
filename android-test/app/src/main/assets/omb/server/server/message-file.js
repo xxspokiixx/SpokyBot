@@ -6,6 +6,7 @@ import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve,
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { windowsPathDestinations } from "../shared/markdown-windows-paths.js";
+import { inSecretFolder, SECRET_FILE_REFUSAL } from "./secret-folder.js";
 export const MESSAGE_FILE_MAX_BYTES = 25 * 1024 * 1024;
 export function messageFileRoots(options) {
     const conversationRoot = options.pinnedCwd === undefined ? options.configuredCwd : options.pinnedCwd;
@@ -351,6 +352,8 @@ export async function openMessageFile(href, roots) {
             sawOutsideRoot = true;
             continue;
         }
+        if (inSecretFolder(canonicalBefore))
+            throw statusError(403, SECRET_FILE_REFUSAL, "secret_file");
         let handle;
         try {
             const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
@@ -366,6 +369,8 @@ export async function openMessageFile(href, roots) {
             const canonicalAfter = await realpath(candidate);
             if (!containedBy(root, canonicalAfter))
                 throw outsideWorkspace();
+            if (inSecretFolder(canonicalAfter))
+                throw statusError(403, SECRET_FILE_REFUSAL, "secret_file");
             const after = await stat(canonicalAfter);
             if (opened.dev !== after.dev || opened.ino !== after.ino) {
                 throw statusError(409, "the linked file changed while it was being opened");
@@ -461,6 +466,8 @@ async function readMessageFolder(href, roots) {
             sawOutsideRoot = true;
             continue;
         }
+        if (inSecretFolder(folder))
+            throw statusError(403, SECRET_FILE_REFUSAL, "secret_file");
         if (!(await stat(folder)).isDirectory())
             throw statusError(400, "the link does not point to a folder");
         const names = (await readdir(folder)).sort((a, b) => a.localeCompare(b));
@@ -473,7 +480,7 @@ async function readMessageFolder(href, roots) {
                 if (!own.isFile() && !own.isSymbolicLink())
                     continue;
                 const target = await realpath(child);
-                if (!containedBy(root, target))
+                if (!containedBy(root, target) || inSecretFolder(target))
                     continue;
                 const info = await stat(target);
                 if (!info.isFile())

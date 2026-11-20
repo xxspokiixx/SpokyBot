@@ -1,8 +1,8 @@
-// The harness side of the bot trigger tools (list_triggers, create_trigger, manage_trigger): what a bot is shown about
+// The harness side of the bot trigger tools (trigger_info, trigger): what a bot is shown about
 // its schedules, webhooks and app events, and how a trigger request is read before it reaches its service.
 import { z } from "zod";
 import { appWhenText } from "./app-trigger-requests.js";
-import { canReachPeer, PEER_ACCESS_HELP } from "./peer-roster.js";
+import { canManage } from "./peer-roster.js";
 import { redactSecretsInText } from "./redact.js";
 const WEEKDAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 const INSTRUCTIONS_SHOWN = 2_000;
@@ -74,7 +74,7 @@ export function agentWebhook(webhook, latestRun) {
         kind: "webhook",
         name: redactSecretsInText(webhook.name),
         ...instructionsOf(webhook.prompt),
-        when: "When another app sends something to its address. For the address to paste into that app's setup, call list_triggers with this trigger_id and include_address; the person also has Copy address on the Automations page.",
+        when: "When another app sends something to its address. For the address to paste into that app's setup, call trigger_info with this trigger_id and include_address; the person also has Copy address on the Automations page.",
         enabled: webhook.enabled,
         runOn: webhook.runOn,
         eventTypes: webhook.eventTypes ?? [],
@@ -125,7 +125,7 @@ export function listTriggers(input) {
         const webhook = webhooks.find((candidate) => candidate.id === input.triggerId);
         const app = apps.find((candidate) => candidate.id === input.triggerId);
         if (!routine && !webhook && !app)
-            return { ...header, error: "No trigger with that id belongs to this bot. Call list_triggers without trigger_id to see its ids." };
+            return { ...header, error: "No trigger with that id belongs to this bot. Call trigger_info without trigger_id to see its ids." };
         const fires = input.runs.filter((run) => run.routineId === input.triggerId).slice(0, FIRES_SHOWN).map(agentRun);
         const shown = routine ? agentRoutine(routine, latest.get(routine.id)) : webhook ? agentWebhook(webhook, latest.get(webhook.id)) : agentAppTrigger(app, latest.get(app.id));
         return { ...header, trigger: { ...shown, recentFires: fires } };
@@ -182,7 +182,7 @@ export function parseTriggerRequest(body, kindOf) {
         return { ok: false, error: `A webhook trigger has no ${misplaced}; it fires when its link is called. Change name, instructions, run_on or webhook_event_types.` };
     return { ok: true, kind: "webhook", forBotId: request.forBotId, operation: { action: request.action, webhookId: request.triggerId, ...(changes ? { changes } : {}) } };
 }
-/** Another bot named by for_bot_id must be in the sender's section; the sender itself needs no target. */
+/** An automation is part of a bot's setup: another bot named by for_bot_id needs the sender's authority, not just reach. */
 export function triggerTarget(from, forBotId, bot) {
     if (forBotId === undefined)
         return {};
@@ -194,7 +194,7 @@ export function triggerTarget(from, forBotId, bot) {
     const target = bot(id);
     if (!target)
         return { status: 404, error: "no bot with that id — call list_bots and copy the exact id from the result" };
-    if (!canReachPeer(from, target))
-        return { status: 403, error: `that bot belongs to a different section or is unavailable. ${PEER_ACCESS_HELP}` };
+    if (!canManage(from, target))
+        return { status: 403, error: "that bot's automations are set up by bots in its own department or by its Chief, or it is unavailable. You can still hand it the work itself with coordinate_bots, or tell the person what to set up there." };
     return { forBot: { botId: target.id, name: target.name } };
 }

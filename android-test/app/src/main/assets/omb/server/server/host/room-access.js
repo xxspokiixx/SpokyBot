@@ -1,5 +1,9 @@
-import { canAccessTeam, coordinatorSupervises, peerAllowed } from "../peer-roster.js";
-export function createRoomAccess({ store }) {
+import { peerAllowed, reachRefusal } from "../peer-roster.js";
+/** Security: what is said in a Team Cloud member's private chat never reaches a room. */
+export const PRIVATE_CHAT_ROOM_WRITE = "This is a private chat, and nothing said here goes into a room, where others would read it. Hand the work to the bot directly (leave group_id out), or tell the person what you wanted to post so they can post it themselves.";
+const NOT_A_MEMBER = "The addressed agent isn't a member of this room; work sent to it again goes to it directly, in a thread of its own";
+const LEFT_THE_ROOM = "The addressed agent is no longer a member of this room, so its room job stopped; work sent to it again goes to it directly, in a thread of its own";
+export function createRoomAccess({ store, privateTo = () => null }) {
     function roomRootProblem(node) {
         const group = node.groupId ? store.group(node.groupId) : undefined;
         const bot = store.bot(node.botId);
@@ -20,36 +24,38 @@ export function createRoomAccess({ store }) {
             return "Destination room task no longer exists";
         if (!node.groupId && !store.taskByThread(bot.id, node.threadId))
             return "Destination bot task no longer exists";
+        if (group && parent && privateTo(parent.threadId))
+            return PRIVATE_CHAT_ROOM_WRITE;
+        if (group && roomSetupPending(group))
+            return "Destination room setup is unfinished";
         if (group && !group.memberIds.includes(bot.id))
-            return "The addressed agent is no longer a member of this room";
+            return NOT_A_MEMBER;
         // A room job in a thread of its own still answers to its room: a member who left it stops.
         const laneThread = laneRoomThread(node);
         const laneRoom = laneThread ? store.groupByThread(laneThread) : undefined;
         if (laneRoom && !laneRoom.dm && !laneRoom.memberIds.includes(bot.id))
-            return "The addressed agent is no longer a member of this room";
-        // Every reader matters: the sender's grant never gives a specialist another team's transcript.
-        const outsideSection = (room, speaker) => room.memberIds.some(id => {
-            const member = store.bot(id);
-            return member && !canAccessTeam(speaker, member.section) && !coordinatorSupervises(member, speaker);
-        });
-        if (group && outsideSection(group, bot))
-            return "Destination room includes a member outside the agent's section";
-        if (group && roomSetupPending(group))
-            return "Destination room setup is unfinished";
+            return LEFT_THE_ROOM;
         if (parent) {
             const from = store.bot(parent.botId);
             const source = parent.groupId ? store.group(parent.groupId) : undefined;
             if (!from || from.hidden || (parent.groupId ? !source || !source.memberIds.includes(from.id) || !store.groupTaskByThread(source.id, parent.threadId) : !store.taskByThread(from.id, parent.threadId)))
                 return "Source membership or task was removed";
-            // Supervision alone never grants a direct chat or another room's access.
-            const sharedSupervisor = source && group && source.id === group.id && parent.threadId === node.threadId && coordinatorSupervises(bot, from);
-            if ((!canAccessTeam(from, bot.section) && !sharedSupervisor) || (source && outsideSection(source, from)))
-                return "Room work cannot cross the sender's section boundary";
             if (source && group && source.id === group.id && parent.threadId !== node.threadId)
                 return "Same-room work must stay in the originating conversation";
             if (!peerAllowed(from, bot))
-                return "The recipient is not an allowed peer of the sender";
+                return reachRefusal(from, bot);
         }
+    }
+    /** Security: work addressed into a room for a bot outside it goes to that bot directly, in a thread of its own, so
+     *  the room's readers never change. A private chat and an unfinished room keep their refusals. */
+    function roomHandoffTarget(node, parent) {
+        const group = node.groupId ? store.group(node.groupId) : undefined;
+        const bot = store.bot(node.botId);
+        if (!group || group.dm || !bot || bot.hidden || group.memberIds.includes(bot.id))
+            return node;
+        if ((parent && privateTo(parent.threadId)) || roomSetupPending(group))
+            return node;
+        return { botId: bot.id, threadId: bot.threadId };
     }
     function laneRoomThread(n) {
         if (n.groupId)
@@ -57,16 +63,14 @@ export function createRoomAccess({ store }) {
         const opener = store.taskByThread(n.botId, n.threadId)?.openedBy;
         return opener?.kind === "work" && opener.roomLane && opener.threadId && store.groupByThread(opener.threadId) ? opener.threadId : undefined;
     }
-    function roomTalks(bot, group) {
+    /** `fromThreadId`: the conversation a bot speaks from; a webhook speaks from none. */
+    function roomTalks(bot, group, fromThreadId) {
         if (group.dm)
             return { ok: false, problem: "dm" };
         if (!group.memberIds.includes(bot.id))
             return { ok: false, problem: "not-member" };
-        const outsider = group.memberIds
-            .map((id) => store.bot(id))
-            .find((member) => member && !canAccessTeam(bot, member.section) && !coordinatorSupervises(member, bot));
-        if (outsider)
-            return { ok: false, problem: "outsider", name: outsider.name };
+        if (fromThreadId !== undefined && privateTo(fromThreadId))
+            return { ok: false, problem: "private" };
         if (roomSetupPending(group))
             return { ok: false, problem: "setup" };
         return { ok: true };
@@ -80,5 +84,5 @@ export function createRoomAccess({ store }) {
             group.setupSkippedAt == null &&
             store.messagesFor(group.threadId).length === 0);
     }
-    return { roomRootProblem, roomHandoffProblem, roomSetupPending, roomTalks, laneRoomThread };
+    return { roomRootProblem, roomHandoffProblem, roomHandoffTarget, roomSetupPending, roomTalks, laneRoomThread };
 }

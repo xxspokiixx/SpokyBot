@@ -4,7 +4,7 @@ import { PASS } from "./table.js";
 const HOLDS = /^\/api\/groups\/([\w-]+)\/holds$/u;
 const BODY = z.object({ botId: z.string().regex(/^[\w-]+$/), held: z.boolean() }).strict();
 export function createRoomHoldRoutes(deps) {
-    return async ({ req, res, path, method, json, readBody }) => {
+    return async ({ req, res, path, method, auth, json, readBody }) => {
         const m = HOLDS.exec(path);
         if (!m || method !== "POST")
             return PASS;
@@ -21,6 +21,6 @@ export function createRoomHoldRoutes(deps) {
         const updated = deps.setHold(m[1], parsed.data.botId, parsed.data.held);
         if (!updated)
             return json(res, 404, { error: "no such room" });
-        return json(res, 200, { ok: true, group: updated });
+        return json(res, 200, { ok: true, group: deps.groupFor?.(auth, updated) ?? updated });
     };
 }

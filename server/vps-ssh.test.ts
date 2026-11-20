@@ -12,13 +12,42 @@ const scratch = () => { const dir = mkdtempSync(join(tmpdir(), "omb-vps-ssh-"));
 function prepareVpsSsh(...args: Parameters<typeof prepare>) {
   const result = prepare(...args);
   if (result.configPath) {
-    const dir = dirname(JSON.parse(readFileSync(result.configPath, "utf8").match(/^  ControlPath (.+)$/m)![1]!));
-    if (dir.startsWith("/tmp/omb-ssh-") && !dirs.includes(dir)) dirs.push(dir);
+    const control = readFileSync(result.configPath, "utf8").match(/^  ControlPath (.+)$/m);
+    const dir = control ? dirname(JSON.parse(control[1]!)) : null;
+    if (dir && dir.startsWith("/tmp/omb-ssh-") && !dirs.includes(dir)) dirs.push(dir);
   }
   return result;
 }
 
 describe("VPS SSH connection sharing supplied by the app", () => {
+  it("drops connection sharing on Android, where link(2) is denied in app storage", () => {
+    // OpenSSH installs its control listener with link(2), and Android's app storage refuses it, so
+    // the phone's guest could never open the socket and every VPS command died on it.
+    const data = join(scratch(), "data", "user", "0", "com.openmausbot.test", "files");
+    const setup = prepareVpsSsh(data, "/usr/bin", "android");
+    const config = readFileSync(setup.configPath!, "utf8");
+    expect(config).toContain("  ControlMaster no");
+    expect(config).not.toContain("ControlPath");
+    // The settings a lone connection still needs stay put.
+    for (const line of ["  StrictHostKeyChecking accept-new", "  ConnectTimeout 10"]) {
+      expect(config).toContain(line);
+    }
+  });
+  it("names the staged identities in the config every ssh consumer reads", () => {
+    const data = scratch();
+    mkdirSync(join(data, "ssh"), { recursive: true });
+    for (const name of ["id_ed25519", "id_rsa", "id_rsa.pub", "config"]) writeFileSync(join(data, "ssh", name), "k");
+    // The asset extractor restores only exec bits, so a key lands readable by everyone.
+    chmodSync(join(data, "ssh", "id_ed25519"), 0o644);
+    const setup = prepareVpsSsh(data, "/usr/bin", "android");
+    const config = readFileSync(setup.configPath!, "utf8");
+    expect(config).toContain(`  IdentityFile ${JSON.stringify(join(data, "ssh", "id_ed25519"))}`);
+    expect(config).toContain(`  IdentityFile ${JSON.stringify(join(data, "ssh", "id_rsa"))}`);
+    expect(config).not.toContain("id_rsa.pub");
+    // Windows has no POSIX modes to tighten.
+    if (process.platform !== "win32") expect(statSync(join(data, "ssh", "id_ed25519")).mode & 0o777).toBe(0o600);
+  });
+
   it("does nothing on Windows, where OpenSSH has no connection sharing", () => {
     const data = scratch();
     expect(prepareVpsSsh(data, "C:\\Windows\\System32", "win32")).toEqual({ configPath: null, path: "C:\\Windows\\System32" });
@@ -31,7 +60,7 @@ describe.skipIf(process.platform === "win32")("VPS SSH connection sharing on POS
   it("writes a config that includes the person's own file first and fills in sharing and timeouts", () => {
     const home = scratch();
     const userConfig = join(home, "config"); writeFileSync(userConfig, "Host my-vps\n  ControlMaster no\n");
-    const text = vpsSshConfigText("/data/ssh", userConfig, join(home, "missing-system-config"));
+    const text = vpsSshConfigText("/data/ssh", "/data/ssh/known_hosts", true, userConfig, join(home, "missing-system-config"));
     const lines = text.split("\n");
     expect(lines.findIndex((line) => line === `Include ${JSON.stringify(userConfig)}`)).toBeLessThan(lines.indexOf("Host *"));
     expect(text).toContain("  ControlMaster auto");
@@ -39,8 +68,25 @@ describe.skipIf(process.platform === "win32")("VPS SSH connection sharing on POS
     expect(text).toContain("  ControlPersist 10m");
     expect(text).toContain("  ServerAliveInterval 15");
     expect(text).toContain("  ConnectTimeout 10");
+    // No terminal can answer an interactive prompt, so an unseen host key must be recorded, and
+    // the app's own file must be the one written, never the person's.
+    expect(text).toContain("  StrictHostKeyChecking accept-new");
+    expect(text).toContain('  UserKnownHostsFile "/data/ssh/known_hosts"');
     expect(text).not.toContain("missing-system-config");
-    expect(vpsSshConfigText("/data/ssh", join(home, "absent"), join(home, "absent2"))).not.toContain("Include");
+    expect(vpsSshConfigText("/data/ssh", "/data/ssh/known_hosts", true, join(home, "absent"), join(home, "absent2"))).not.toContain("Include");
+  });
+
+  it("drops connection sharing on Android, where link(2) is denied in app storage", () => {
+    const home = scratch();
+    const shared = vpsSshConfigText("/data/ssh", "/data/ssh/known_hosts", true, join(home, "absent"), join(home, "absent"));
+    const alone = vpsSshConfigText("/data/ssh", "/data/ssh/known_hosts", false, join(home, "absent"), join(home, "absent"));
+    expect(shared).toContain("  ControlMaster auto");
+    expect(alone).toContain("  ControlMaster no");
+    expect(alone).not.toContain("ControlPath");
+    // The host-key and timeout settings a single connection still needs stay put.
+    for (const line of ["  StrictHostKeyChecking accept-new", "  ConnectTimeout 10", "  ServerAliveInterval 15"]) {
+      expect(alone).toContain(line);
+    }
   });
 
   it("installs a shim docker finds ahead of the real ssh, pointing at that config, with private modes", () => {
@@ -54,7 +100,12 @@ describe.skipIf(process.platform === "win32")("VPS SSH connection sharing on POS
     expect(statSync(join(data, "ssh", "bin", "ssh")).mode & 0o777).toBe(0o700);
     expect(statSync(setup.configPath!).mode & 0o777).toBe(0o600);
     expect(statSync(join(data, "ssh")).mode & 0o777).toBe(0o700);
+    const knownHosts = join(data, "ssh", "known_hosts");
+    expect(statSync(knownHosts).mode & 0o777).toBe(0o600);
+    // A second run must not truncate the host keys the first one already recorded.
+    writeFileSync(knownHosts, "vps.example ssh-ed25519 AAAA\n");
     expect(prepareVpsSsh(data, `${fakeBin}:/usr/bin`, "darwin")).toEqual(setup);
+    expect(readFileSync(knownHosts, "utf8")).toBe("vps.example ssh-ed25519 AAAA\n");
   });
 
   it("never picks its own shim as the real ssh, and leaves PATH alone when no ssh exists", () => {
@@ -71,7 +122,7 @@ describe.skipIf(process.platform === "win32")("VPS SSH connection sharing on POS
     const home = scratch();
     const userConfig = join(home, "my config");
     writeFileSync(userConfig, "Host fixture-vps\n  HostName 192.0.2.1\n");
-    const config = vpsSshConfigText("/isolated/space path/100%", userConfig, join(home, "absent"));
+    const config = vpsSshConfigText("/isolated/space path/100%", "/isolated/space path/100%/known_hosts", true, userConfig, join(home, "absent"));
     // A real file, not /dev/stdin: spawnSync feeds stdin through a socketpair, which Linux refuses to reopen (ENXIO).
     const generatedConfig = join(home, "generated config");
     writeFileSync(generatedConfig, config);

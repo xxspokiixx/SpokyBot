@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shouldMountLocalComputer } from "./local-routing.ts";
+import { localVmOffered, shouldMountLocalComputer } from "./local-routing.ts";
 
 describe("local computer routing", () => {
   it("never lets Linux Auto fall back to the user's desktop", () => {
@@ -26,6 +26,18 @@ describe("local computer routing", () => {
         hostPlatform: "linux",
         providerSupportsLocal: false,
       }),
+    ).toBe(false);
+  });
+
+  it("mounts the phone's local computer only on an explicit pick, never on Auto", () => {
+    expect(
+      shouldMountLocalComputer({ requested: "local", hostPlatform: "android", providerSupportsLocal: true }),
+    ).toBe(true);
+    expect(
+      shouldMountLocalComputer({ requested: "local", hostPlatform: "android", providerSupportsLocal: false }),
+    ).toBe(false);
+    expect(
+      shouldMountLocalComputer({ requested: undefined, hostPlatform: "android", providerSupportsLocal: true }),
     ).toBe(false);
   });
 
@@ -80,5 +92,12 @@ describe("local computer routing", () => {
         providerSupportsLocal: false,
       }),
     ).toBe(false);
+  });
+
+  it("never offers a Local VM where no container runtime exists", () => {
+    expect(localVmOffered("darwin")).toBe(true);
+    expect(localVmOffered("win32")).toBe(true);
+    expect(localVmOffered("linux")).toBe(true);
+    expect(localVmOffered("android")).toBe(false);
   });
 });

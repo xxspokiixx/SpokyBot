@@ -2,7 +2,7 @@
 // SpokyBot runs on decides which classes pass.
 import { BlockList, isIP } from "node:net";
 import { z } from "zod";
-import { addressClass, ownAddresses } from "../../../electron/egress-addresses.mjs";
+import { addressClass, listed, ownAddresses } from "../../../electron/egress-addresses.mjs";
 export { addressClass, ownAddresses };
 /** How a refusal reads in the page-health line. */
 export const REFUSAL_TEXT = {
@@ -18,6 +18,9 @@ export const REFUSAL_TEXT = {
     port: "a port other than 80 and 443, which the person's computer does not open for bots",
 };
 const family = (address) => (isIP(address) === 6 ? "ipv6" : "ipv4");
+/** Clash, Surge and other proxies in TUN + fake-IP mode answer every name from 198.18.0.0/15 and route it themselves. */
+const FAKE_IP = new BlockList();
+FAKE_IP.addSubnet("198.18.0.0", 15, "ipv4");
 /** An address literal, or a name RFC 6761 and Chrome resolve to loopback themselves. */
 export function namesThisMachine(host) {
     return isIP(host) !== 0 || /^(?:[^.]+\.)*localhost\.?$/i.test(host);
@@ -73,7 +76,14 @@ export function allowList(entries) {
 export async function refusalFor(target, addresses, rules, own = ownAddresses()) {
     const { host, port } = target;
     for (const { address } of addresses) {
-        const kind = addressClass(address, own);
+        let kind = addressClass(address, own);
+        // On the desktop these come from the person's own proxy: the local network, unless this computer holds the address.
+        if (kind === "reserved" && rules.host === "desktop" && listed(FAKE_IP, address)) {
+            // The proxy picks the real destination, which may be this computer: never let it reach SpokyBot's own ports.
+            if (rules.ownPort(port))
+                return "omb";
+            kind = listed(own, address) ? "this-machine" : "private";
+        }
         if (kind === "public")
             continue;
         if (kind === "metadata" || kind === "link-local" || kind === "reserved")

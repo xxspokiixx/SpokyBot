@@ -58,8 +58,14 @@ export const duration = (ms) => ms >= 60_000 ? `${Math.floor(ms / 60_000)}m` : `
 export const clip = (text, max) => text.length > max ? text.slice(0, max) : text;
 export const isTerminal = (a) => terminal(a.status);
 export const awaited = (children) => children.filter(c => c.reply !== "none");
-/** Parked on a question the person answers in words; a card park waits on the card instead. */
-export const asking = (a) => a.status === "needs_input" && !(a.cards && a.cards.length > 0);
+/** Parked on something its requester hears of at once: a question answered in words, or, at Full access, a card too, so
+ * the rest of the work moves on while the person acts on it. Another card park waits on its card. */
+export const asking = (a) => a.status === "needs_input" && (!(a.cards && a.cards.length > 0) || a.level === "full");
+/** A one-way notice from the turn running `parent` back into the conversation that handed it that work with reply none.
+ * Nothing returns from such work on its own, so this is the only way its answer gets back: the ancestor rule lets it
+ * through, but never as new work and never into another conversation of that bot. */
+export const answersSender = (parent, mode, target) => mode === "notify" && parent?.reply === "none" && parent.requester.botId === target.botId && parent.requester.threadId === target.threadId
+    && parent.assignee.destination.groupId === undefined && target.groupId === undefined;
 export function path(store, n) {
     const out = [];
     const seen = new Set();

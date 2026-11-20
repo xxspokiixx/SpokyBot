@@ -2,6 +2,8 @@
 // the server writes and only the server may edit. Text from mail and invites is untrusted, so it is shown as plain Text
 // and Caption nodes only, and a link becomes a button only when it is an https link with no username or password.
 import { WEB_URL_MAX, WIDGET_LIMITS } from "../../shared/widget.js";
+import { intlLocale } from "../language.js";
+import { briefWords } from "./brief-words.js";
 import { localDate, validZone } from "./check-plan.js";
 import { clip, oneLine } from "./text-clip.js";
 const DAY = 24 * 60 * 60_000;
@@ -10,10 +12,10 @@ const summary = (value) => oneLine(value, SUMMARY_MAX);
 const zoneOf = (timeZone) => validZone(timeZone) ?? "UTC";
 // ICU puts a narrow no-break space before AM/PM; cards and tests read plain spaces.
 const plain = (text) => text.replace(/\s/g, " ");
-const bareClock = (ms, timeZone) => plain(new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: zoneOf(timeZone) }));
+const bareClock = (ms, timeZone, language) => plain(new Date(ms).toLocaleTimeString(intlLocale(language), { hour: "numeric", minute: "2-digit", timeZone: zoneOf(timeZone) }));
 /** Labelled UTC when no zone is known. */
-export function clockTime(ms, timeZone) {
-    return validZone(timeZone) ? bareClock(ms, timeZone) : `${bareClock(ms, timeZone)} UTC`;
+export function clockTime(ms, timeZone, language) {
+    return validZone(timeZone) ? bareClock(ms, timeZone, language) : `${bareClock(ms, timeZone, language)} UTC`;
 }
 function dayLabel(start, timeZone, now) {
     const date = localDate(start, timeZone);
@@ -49,10 +51,10 @@ export function httpsLink(url) {
         return undefined;
     }
 }
-const joinButton = (event) => {
+const joinButton = (event, label = "Join") => {
     const link = httpsLink(event.joinUrl);
     const action = link ? openUrl(link) : undefined;
-    return action ? [button("Join", action, true)] : [];
+    return action ? [button(label, action, true)] : [];
 };
 const buttons = (items) => (items.length ? [{ type: "Row", gap: 2, wrap: true, children: items }] : []);
 const text = (value) => ({ type: "Text", value: clip(value, WIDGET_LIMITS.text) });
@@ -82,66 +84,65 @@ export function reminderCard(input) {
     const title = `${event.title} with ${attendeeNames(event)} in ${minutes} minute${minutes === 1 ? "" : "s"}`;
     return { card: root(title, meetingWhen(event.start, event.end, input.timeZone, input.now), buttons(joinButton(event))), summary: summary(title) };
 }
-export const BRIEF_TITLE = "Your brief";
 export const BRIEF_ROWS = 6;
 export const DISMISS_ACTION = "dismiss_row";
 export const DRAFT_ACTION = "draft_reply";
-export const BRIEF_INTRO = "I keep an eye on your calendar and email and put what needs you here, once a day and when you come back. Tell me to stop, or what to watch for.";
 const BRIEF_TEXT = { line: 120, note: 160, sender: 40, label: 32, link: 600 };
-const NOTHING_NEEDS_YOU = "Nothing needs you right now.";
-const NEEDS_YOU = "Needs you";
 function senderName(rawFrom) {
     const from = rawFrom.slice(0, 300);
     const match = /^\s*"?([^"<]*?)"?\s*<([^>]*)>\s*$/.exec(from);
     return match ? match[1].trim() || match[2].trim() : from.trim();
 }
-const sender = (email, max) => oneLine(senderName(email.from), max) || "(no sender)";
+const sender = (email, max, w) => oneLine(senderName(email.from), max) || w.noSender;
 const rowLines = (value, note) => [{ type: "Text", value: clip(value, BRIEF_TEXT.line), weight: "medium" }, ...(note ? [caption(note)] : [])];
 const rowBeside = (value, note, presses) => ({ type: "Row", gap: 3, align: "center", children: [{ type: "Col", flex: 1, children: rowLines(value, note) }, ...presses] });
 const rowUnder = (value, note, presses) => ({ type: "Col", gap: 1, children: [...rowLines(value, note), ...buttons(presses)] });
-function capped(rows, total) {
+function capped(rows, w) {
     const shown = rows.slice(0, BRIEF_ROWS);
-    return total > shown.length ? [...shown, caption(`and ${total - shown.length} more`)] : shown;
+    return rows.length > shown.length ? [...shown, caption(w.more(rows.length - shown.length))] : shown;
 }
-const section = (title, rows, total, empty) => [{ type: "Title", value: title, size: "sm" }, ...(rows.length ? capped(rows, total) : empty ? [text(empty)] : [])];
-const openButton = (target) => (target ? [button("Open", { type: "open_thread", payload: target })] : []);
-const pageButton = (url) => { const link = httpsLink(url), open = link ? openUrl(link) : undefined; return open ? [button("Open page", open)] : []; };
-function emailRow(email) {
-    const who = sender(email, BRIEF_TEXT.label);
+const section = (title, rows, w, empty, after = []) => [{ type: "Title", value: title, size: "sm" }, ...(rows.length ? capped(rows, w) : empty ? [text(empty)] : []), ...after];
+const openButton = (target, w) => (target ? [button(w.open, { type: "open_thread", payload: target })] : []);
+const pageButton = (url, w) => { const link = httpsLink(url), open = link ? openUrl(link) : undefined; return open ? [button(w.openPage, open)] : []; };
+function emailRow(email, w) {
+    const who = sender(email, BRIEF_TEXT.label, w);
     const gmail = email.threadId.length <= BRIEF_TEXT.link ? openUrl(gmailUrl(email.threadId)) : undefined;
-    const note = email.needsReply ? (email.why ? `Waiting on your reply · ${email.why}` : "Waiting on your reply") : email.why ?? "Important";
-    return rowUnder(`${sender(email, BRIEF_TEXT.sender)}: ${email.subject || "(no subject)"}`, note, [
-        button(`Draft a reply to ${who}`, { type: DRAFT_ACTION, payload: { messageId: email.messageId } }, true),
-        ...(gmail ? [button("Open in Gmail", gmail)] : []),
-        button(`Dismiss ${who}'s email`, { type: DISMISS_ACTION, payload: { messageId: email.messageId } }),
+    const note = email.needsReply ? (email.why ? `${w.waitingOnReply} · ${email.why}` : w.waitingOnReply) : email.why ?? w.important;
+    return rowUnder(`${sender(email, BRIEF_TEXT.sender, w)}: ${email.subject || w.noSubject}`, note, [
+        button(w.draftReply(who), { type: DRAFT_ACTION, payload: { messageId: email.messageId } }, true),
+        ...(gmail ? [button(w.openInGmail, gmail)] : []),
+        button(w.dismiss(who), { type: DISMISS_ACTION, payload: { messageId: email.messageId } }),
     ]);
 }
-const longDate = (now, timeZone) => plain(new Date(now).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: zoneOf(timeZone) }));
-const plural = (count, noun) => `${count} ${noun}${count === 1 ? "" : "s"}`;
+const longDate = (now, timeZone, language) => plain(new Date(now).toLocaleDateString(intlLocale(language), { weekday: "long", month: "long", day: "numeric", timeZone: zoneOf(timeZone) }));
 export function briefCard(facts) {
-    const zone = facts.timeZone;
+    const { timeZone: zone, language } = facts;
+    const w = briefWords(language);
     const replies = facts.emails.filter((email) => email.needsReply);
     const important = facts.emails.filter((email) => !email.needsReply);
-    const needRows = [...replies.map(emailRow), ...facts.needs.map((row) => rowBeside(row.text, row.note, openButton(row.open)))];
+    const needRows = [...replies.map((email) => emailRow(email, w)), ...facts.needs.map((row) => rowBeside(row.text, row.note, openButton(row.open, w)))];
     const meetings = [...(facts.meetings ?? [])].sort((a, b) => a.start - b.start);
-    const meetingRows = meetings.map((meeting) => rowBeside(`${clockTime(meeting.start, zone)} · ${meeting.title}`, "", joinButton(meeting)));
-    const waiting = facts.waiting === true ? "More new emails than one check reads; I'll sort the rest next."
-        : facts.waiting ? `${plural(facts.waiting, "more new email")} since you were away; I'll sort them next.` : undefined;
-    const importantRows = [...important.map(emailRow), ...(waiting ? [caption(waiting)] : [])];
-    const routineRows = facts.routines.map((row) => rowBeside(row.text, row.note, [...pageButton(row.page), ...openButton(row.open)]));
+    const meetingRows = meetings.map((meeting) => rowBeside(`${clockTime(meeting.start, zone, language)} · ${meeting.title}`, "", joinButton(meeting, w.join)));
+    const waiting = facts.waiting === true ? w.waitingMany : facts.waiting ? w.waitingCount(facts.waiting) : undefined;
+    const importantRows = important.map((email) => emailRow(email, w));
+    const waitingNotice = waiting ? [caption(waiting)] : [];
+    const routineRows = facts.routines.map((row) => rowBeside(row.text, row.note, [...pageButton(row.page, w), ...openButton(row.open, w)]));
+    const ideaRows = (facts.ideas ?? []).map((row) => rowBeside(row.text, row.note, []));
     const children = [
-        ...(facts.intro ? [caption(BRIEF_INTRO)] : []),
-        ...section(NEEDS_YOU, needRows, needRows.length, NOTHING_NEEDS_YOU),
-        ...(facts.meetings === null ? [] : section("Your day", meetingRows, meetingRows.length, "No more meetings today.")),
-        ...(importantRows.length ? section("Important emails", importantRows, importantRows.length) : []),
-        ...(routineRows.length ? section("Routines", routineRows, routineRows.length) : []),
+        ...(facts.overnight ? [{ type: "Text", value: clip(facts.overnight, BRIEF_TEXT.note * 2), weight: "medium" }] : []),
+        ...(facts.intro ? [caption(w.intro)] : []),
+        ...section(w.needsYou, needRows, w, w.nothingNeedsYou),
+        ...(facts.meetings === null ? [] : section(w.yourDay, meetingRows, w, w.noMoreMeetings)),
+        ...(importantRows.length || waitingNotice.length ? section(w.importantEmails, importantRows, w, undefined, waitingNotice) : []),
+        ...(routineRows.length ? section(w.routines, routineRows, w) : []),
+        ...(ideaRows.length ? section(w.ideas, ideaRows, w) : []),
     ];
-    const needCount = needRows.length;
     const parts = [
-        needCount && `${needCount} ${needCount === 1 ? "needs" : "need"} you`,
-        facts.meetings && facts.meetings.length && plural(facts.meetings.length, "meeting"),
-        important.length && plural(important.length, "important email"),
-        facts.routines.length && plural(facts.routines.length, "routine result"),
+        needRows.length && w.summary.needs(needRows.length),
+        facts.meetings && facts.meetings.length && w.summary.meetings(facts.meetings.length),
+        important.length && w.summary.emails(important.length),
+        facts.routines.length && w.summary.routines(facts.routines.length),
+        ideaRows.length && w.summary.ideas(ideaRows.length),
     ].filter(Boolean);
-    return { card: root(BRIEF_TITLE, longDate(facts.now, zone), children), summary: summary(`${BRIEF_TITLE}: ${parts.length ? parts.join(", ") : "nothing needs you right now"}`) };
+    return { card: root(w.title, longDate(facts.now, zone, language), children), summary: summary(`${w.title}: ${parts.length ? parts.join(", ") : w.summary.nothing}`) };
 }

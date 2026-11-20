@@ -6,6 +6,7 @@ import { basename, join } from "node:path";
 import { qualifiedModelLabel } from "../contracts.js";
 import { killCliTree, spawnCli } from "../procs.js";
 import { codexHome } from "./codex-identity.js";
+import { unconfirmedModelCatalog } from "../startup-model-catalog.js";
 import { mergeLocalInject } from "./local-inject.js";
 export const STATIC_CODEX_MODELS = {
     default: "gpt-5.6-sol",
@@ -331,7 +332,13 @@ async function probeProviderModels(provider, env, fetchImpl) {
     }
 }
 export async function readCodexModelCatalog(env = process.env, fetchImpl = fetch, cli) {
-    const official = (cli ? await readCodexAppServerModelCatalog(cli, env) : null) ?? STATIC_CODEX_MODELS;
+    const official = cli ? await readCodexAppServerModelCatalog(cli, env) : null;
+    const catalog = await catalogAround(official ?? STATIC_CODEX_MODELS, env, fetchImpl);
+    if (cli && !official)
+        unconfirmedModelCatalog(catalog);
+    return catalog;
+}
+async function catalogAround(official, env, fetchImpl) {
     // A relative CODEX_HOME or user home must not load a catalog from another directory.
     const home = codexHome(env);
     if (!home)

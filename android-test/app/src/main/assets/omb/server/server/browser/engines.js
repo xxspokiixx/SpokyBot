@@ -152,25 +152,50 @@ export class ChromeEngine {
         return target ? this.service.loginDeps(target) : null;
     }
 }
+/** afterClaim's refusal, thrown out of the engine's dispatch and answered as the call's result. */
+class ClaimRefused extends Error {
+}
 /** BrowserRuntime's API, each call going to the engine its session runs on. */
 export class RuntimeRouter {
     #old;
     #chrome;
     #refusal;
+    #afterClaim;
     #annotate;
+    #afterCall;
     constructor(old, chrome, options = {}) {
         this.#old = old;
         this.#chrome = chrome;
         this.#refusal = options.refusal;
+        this.#afterClaim = options.afterClaim;
         this.#annotate = options.annotate;
+        this.#afterCall = options.afterCall;
     }
     async agentRpc(session, spec, method, params, beforeDispatch, ctx) {
-        const refusal = method === "tools/call" ? this.#refusal?.(spec, params) : null;
+        const refusal = method === "tools/call" ? this.#refusal?.(session, spec, params) : null;
         if (refusal)
             return { isError: true, content: [{ type: "text", text: refusal }] };
+        const afterClaim = method === "tools/call" ? this.#afterClaim : undefined;
+        const dispatch = afterClaim ? () => {
+            beforeDispatch?.();
+            const text = afterClaim(session, spec);
+            if (text)
+                throw new ClaimRefused(text);
+        } : beforeDispatch;
         const target = chromeTarget(session, spec);
-        const result = await (target ? this.#chrome.service.agentRpc(target, method, params, beforeDispatch) : this.#old.agentRpc(session, spec, method, params, beforeDispatch, ctx));
-        return method === "tools/call" && this.#annotate ? this.#annotate(spec, result) : result;
+        let result;
+        try {
+            result = await (target ? this.#chrome.service.agentRpc(target, method, params, dispatch) : this.#old.agentRpc(session, spec, method, params, dispatch, ctx));
+        }
+        catch (error) {
+            if (error instanceof ClaimRefused)
+                return { isError: true, content: [{ type: "text", text: error.message }] };
+            throw error;
+        }
+        if (method !== "tools/call")
+            return result;
+        const annotated = this.#annotate ? this.#annotate(spec, result) : result;
+        return this.#afterCall ? this.#afterCall(session, spec, annotated) : annotated;
     }
     previewFrame(session, capture, spec) {
         return chromeTarget(session, spec) ? this.#chrome.service.previewFrame(session) : this.#old.previewFrame(session, capture);

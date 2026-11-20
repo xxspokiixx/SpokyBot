@@ -81,6 +81,8 @@ export class OwnListeners {
 /** What the bot reads once when a site that turns away data centres loads from My Cloud's own connection because the
  * person's computer is away. */
 export const awayNotice = (device) => `The person's ${device} is away, so sites that turn away data centres, such as Instagram, YouTube and Google sign-in, load from My Cloud's own connection for now and may refuse. They open through the ${device} again once it is back.`;
+/** What the bot reads once when those sites load from My Cloud's own connection because no computer shares one. */
+export const UNSHARED_NOTICE = `Sites that turn away data centres, such as Instagram, YouTube and Google sign-in, load from My Cloud's own connection and may refuse it with an error page or "too many requests". If one does and the person needs it, tell them these sites open through their own computer's internet connection while SpokyBot is open on it, signed in to SpokyBot Cloud.`;
 /** One gate per browser session for the life of the server, so a Chrome keeps the port it launched with. */
 export class BrowserEgress {
     setup = null;
@@ -119,18 +121,21 @@ export class BrowserEgress {
         };
     }
     /** The way out for one of `session`'s connections to a site that turns away data centres: on SpokyBot Cloud the
-     * person's computer while it lends its connection, else this server's own (when that computer is away, the bot is told
-     * once). Every other site always goes this server's own way. */
+     * person's computer while it lends its connection, else this server's own (when that computer is away, or none shares
+     * its connection, the bot is told once). Every other site always goes this server's own way. */
     through(session) {
         const device = this.setup?.host === "cloud" ? this.setup.device?.(session) ?? null : null;
         if (device && "open" in device) {
             this.toldAway.delete(session);
             return device;
         }
-        if (device && !this.toldAway.has(session))
-            this.toldAway.set(session, awayNotice(device.away));
-        if (!device)
+        if (!device) {
             this.toldAway.delete(session);
+            return null;
+        }
+        const kind = "away" in device ? "away" : "unshared";
+        if (this.toldAway.get(session)?.kind !== kind)
+            this.toldAway.set(session, { kind, text: "away" in device ? awayNotice(device.away) : UNSHARED_NOTICE });
         return null;
     }
     /** The gate port for `session`'s Chrome, opened on first use. */
@@ -163,9 +168,10 @@ export class BrowserEgress {
     takeNotice(session) {
         const list = this.blocked.get(session);
         this.blocked.delete(session);
-        const away = this.toldAway.get(session);
-        if (away)
-            this.toldAway.set(session, "");
+        const told = this.toldAway.get(session);
+        const away = told?.text;
+        if (told)
+            told.text = "";
         const lines = away ? [away] : [];
         if (list?.length) {
             const shown = list.slice(0, NOTICE_SHOWN).map((entry) => `${JSON.stringify(entry.target)} (blocked: ${REFUSAL_TEXT[entry.reason] ?? "not allowed"})`);

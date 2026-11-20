@@ -57,8 +57,8 @@ export function initialDesktopCapabilities(): DesktopCapabilities {
     ...browserCapabilities,
     host: {
       ...browserCapabilities.host,
-      platform: platform === "darwin" || platform === "linux" || platform === "win32" ? platform : "other",
-      label: platform === "darwin" ? "macOS" : platform === "linux" ? "Linux" : platform === "win32" ? "Windows" : "Desktop",
+      platform: platform === "darwin" || platform === "linux" || platform === "win32" || platform === "android" ? platform : "other",
+      label: platform === "darwin" ? "macOS" : platform === "linux" ? "Linux" : platform === "win32" ? "Windows" : platform === "android" ? "Android" : "Desktop",
     },
     windowChrome: isMac ? "mac-inset" : platform === "win32" ? "win-caption" : "native",
     dictation,

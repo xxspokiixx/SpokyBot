@@ -1,9 +1,22 @@
 // Container entry: restarts the server in place on RESTART_EXIT_CODE, since a container restart cuts off a Caddy sharing its network.
 import { spawn } from "node:child_process";
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { restartPolicy } from "./restart.js";
+import { boxMemory, heapSizeArgs } from "./box-memory.js";
+import { restartLine, restartPolicy } from "./restart.js";
+/** The server's heap sized to the container's memory limit, run through the bootstrap that keeps Node's compile cache on
+ * the data volume, so a restarted container reuses the compiled bundle. */
+export function serverCommand(here, env, options = {}) {
+    const bootstrap = join(here, "desktop-entry.mjs");
+    const cached = (options.exists ?? existsSync)(bootstrap);
+    const dataDir = env.OMB_DATA_DIR || join(homedir(), ".openmausbot");
+    return {
+        args: [...heapSizeArgs((options.box ?? boxMemory()).cgroupLimit, env.NODE_OPTIONS), cached ? bootstrap : join(here, "index.js")],
+        env: cached ? { ...env, OMB_SERVER_COMPILE_CACHE: join(dataDir, "cache", "node-compile") } : env,
+    };
+}
 export function superviseServer(start, options = {}) {
     const signals = options.signals ?? process, now = options.now ?? Date.now;
     return new Promise((done) => {
@@ -16,9 +29,13 @@ export function superviseServer(start, options = {}) {
             child = start();
             child.once("error", () => finish(1));
             child.once("exit", (code, signal) => {
-                if (policy.again(code, stopping)) {
-                    console.log("SpokyBot is starting again to finish installing a copy from the desktop app…");
-                    run();
+                if (policy.again(code, stopping, signal)) {
+                    const delay = policy.delayMs();
+                    console.log(restartLine(code, delay));
+                    if (delay)
+                        setTimeout(run, delay);
+                    else
+                        run();
                     return;
                 }
                 finish(code ?? (stopping && (signal === "SIGTERM" || signal === "SIGINT") ? 0 : 1));
@@ -39,6 +56,6 @@ function isEntry() {
     }
 }
 if (isEntry()) {
-    const server = join(dirname(fileURLToPath(import.meta.url)), "index.js");
-    void superviseServer(() => spawn(process.execPath, [server], { stdio: "inherit" })).then((code) => { process.exitCode = code; });
+    const server = serverCommand(dirname(fileURLToPath(import.meta.url)), process.env);
+    void superviseServer(() => spawn(process.execPath, server.args, { stdio: "inherit", env: server.env })).then((code) => { process.exitCode = code; });
 }

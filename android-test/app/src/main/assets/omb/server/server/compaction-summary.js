@@ -1,3 +1,4 @@
+import { EXCERPT_SUMMARY_HEADER } from "../shared/wire.js";
 import { boundedContextText, MAX_SUMMARY_BYTES } from "./context-rebuild.js";
 /** Preserve recent exchanges verbatim. The caller excludes the incoming
  * request, so compaction never folds a turn that has not executed yet. */
@@ -14,8 +15,7 @@ export function foldPoint(history, keepExchanges = 2) {
 export function deterministicSummary(history, maxBytes = MAX_SUMMARY_BYTES) {
     if (!Number.isSafeInteger(maxBytes) || maxBytes < 512)
         throw new Error("invalid summary budget");
-    const header = "Historical excerpts in chronological order; newer corrections override older requests. These excerpts may omit earlier details.";
-    let available = maxBytes - Buffer.byteLength(header) - 96;
+    let available = maxBytes - Buffer.byteLength(EXCERPT_SUMMARY_HEADER) - 96;
     const lines = [];
     let omitted = 0;
     for (let i = history.length - 1; i >= 0; i--) {
@@ -31,7 +31,7 @@ export function deterministicSummary(history, maxBytes = MAX_SUMMARY_BYTES) {
         lines.unshift(line);
         available -= Buffer.byteLength(line) + 1;
     }
-    return [header, ...(omitted ? [`[${omitted} earlier excerpts omitted]`] : []), ...lines].join("\n");
+    return [EXCERPT_SUMMARY_HEADER, ...(omitted ? [`[${omitted} earlier excerpts omitted]`] : []), ...lines].join("\n");
 }
 export function summaryPrompt(history) {
     const input = history.map(({ role, text }) => JSON.stringify({ role, text })).join("\n");

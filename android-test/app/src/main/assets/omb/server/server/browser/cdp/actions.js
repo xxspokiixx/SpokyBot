@@ -166,9 +166,18 @@ async function untilDialog(context, action) {
         dialog.cancel();
     }
 }
+/** A point the bot passed, refused outside the viewport as it is now: a person's panel can resize it between two calls. */
+async function inViewport(context, point) {
+    const size = await valueInWorld(context.frames, context.frames.mainFrameId, "[innerWidth, innerHeight]").catch(() => null);
+    if (size && (point.x >= size[0] || point.y >= size[1])) {
+        throw new DriverError("refused", `${Math.round(point.x)},${Math.round(point.y)} is outside the page's viewport, which is ${size[0]}x${size[1]} CSS pixels now. Take a new screenshot and aim inside it.`);
+    }
+    return point;
+}
 /** Where to act: found, shown to people watching, then found again, since the page may have moved meanwhile. */
 async function pointAfterShowing(context, at, deadline, phase, pointer, options = {}) {
     if ("x" in at) {
+        await inViewport(context, at);
         await pointer?.(at, phase);
         return at;
     }
@@ -358,7 +367,7 @@ export async function drag(context, from, to, { timeoutMs = DEFAULT_ACTION_TIMEO
     const deadline = Date.now() + timeoutMs;
     const source = isPoint(from) ? null : await element(context, from);
     const start = await pointAfterShowing(context, source ?? from, deadline, "move", pointer);
-    const end = isPoint(to) ? to : await actionablePoint(context, await element(context, to), deadline, { hitTest: false });
+    const end = isPoint(to) ? await inViewport(context, to) : await actionablePoint(context, await element(context, to), deadline, { hitTest: false });
     const sourceFrame = source?.frameId ?? context.frames.mainFrameId;
     const session = context.session;
     const intercepted = { data: null };
@@ -404,7 +413,7 @@ export async function scroll(context, target, deltaX, deltaY, { timeoutMs = DEFA
     await context.bringToFront();
     const point = target === null
         ? await valueInWorld(context.frames, context.frames.mainFrameId, VIEWPORT_CENTER)
-        : isPoint(target) ? target : await actionablePoint(context, await element(context, target), Date.now() + timeoutMs, { hitTest: false });
+        : isPoint(target) ? await inViewport(context, target) : await actionablePoint(context, await element(context, target), Date.now() + timeoutMs, { hitTest: false });
     await context.mouse.move(point.x, point.y);
     await context.mouse.wheel(deltaX, deltaY);
     await valueInWorld(context.frames, context.frames.mainFrameId, NEXT_FRAME, { awaitPromise: true }).catch(() => { });

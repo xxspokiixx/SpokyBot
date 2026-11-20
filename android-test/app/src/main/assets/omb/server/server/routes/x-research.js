@@ -94,6 +94,8 @@ export function createXResearchInternalRoutes(deps) {
         catch (error) {
             if (!(error instanceof XResearchError))
                 throw error;
+            if (error.code === "off" && prefix === RESEARCH_PREFIX)
+                deps.researchOff?.();
             const message = error.code === "bad_key" && deps.cloudHome && credential.included ? X_MESSAGES.homeBadKey : error.message;
             ctx.json(ctx.res, statusFor(error.code), { error: message, code: error.code });
         }

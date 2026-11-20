@@ -14,6 +14,7 @@ import type { BrowserLive } from "../browser-live.ts";
 import type { BrowserRuntime } from "../browser-runtime.ts";
 import type { CacheKeepWarm } from "../cache-keepwarm.ts";
 import { cloudBackendChangeError, vpsBotAliasChangeError, vpsLeftBehindNotice, VPS_BOT_ALIAS_CHANGE_ERROR, VPS_BOT_ALIAS_LIFECYCLE_ERROR, VPS_BOT_ALIAS_RESOURCES_ERROR } from "../cloud-backend.ts";
+import { dropRemovedGrants, MAX_ALWAYS_ALLOW } from "../always-allow.ts";
 import * as composio from "../composio.ts";
 import { isValidVpsSshTarget, type AppConfig } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
@@ -38,6 +39,8 @@ import { PASS, type RouteHandler } from "./table.ts";
 
 export interface BotPatchRouteDeps {
   store: Store;
+  /** The turns running now, so a grant the person removed leaves a turn that still holds a copy. */
+  turnBots?: { values(): Iterable<{ id: string; alwaysAllow?: string[] }> };
   cfg: AppConfig;
   registry: Pick<ProviderRegistry, "get">;
   sessions: Pick<SessionRegistry, "isLive">;
@@ -579,7 +582,11 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (!Array.isArray(body.alwaysAllow) || body.alwaysAllow.some((t: unknown) => typeof t !== "string")) {
           return json(res, 400, { error: "alwaysAllow must be a list of tool keys" });
         }
-        patch.alwaysAllow = [...new Set(body.alwaysAllow as string[])].slice(0, 200);
+        const keys = [...new Set(body.alwaysAllow as string[])];
+        if (keys.length > MAX_ALWAYS_ALLOW) {
+          return json(res, 400, { error: `A bot remembers at most ${MAX_ALWAYS_ALLOW} standing grants; this list has ${keys.length}.` });
+        }
+        patch.alwaysAllow = keys;
       }
       // Known gap: outside the packaged desktop, loopback is the owner, so these loosenings are one curl from
       // the bot they constrain. An originless, session-less loopback caller may loosen only while every bot is idle.
@@ -710,6 +717,9 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         bot = store.patchBot(m[1], patch);
       }
       if (!bot) return json(res, 404, { error: "no such bot" });
+      // The person edits the bot's list in Settings, so a grant they took off leaves every thread and running turn of the
+      // bot in the same save: no thread may keep allowing what Settings no longer shows.
+      if (Array.isArray(patch.alwaysAllow)) dropRemovedGrants(store, deps.turnBots?.values() ?? [], m[1], patch.alwaysAllow);
       if (body.applyToAllThreads === true && requestedApprovalMode !== "custom") store.setAllThreadApprovalMode(bot.id, requestedApprovalMode);
       if (body.memoryUpkeep === false || body.memoryEnabled === false) memoryUpkeep.dropBot(bot.id);
       if (body.cacheKeepWarm !== undefined) cacheKeepWarm.refresh();

@@ -30,3 +30,9 @@ export declare function acquireDataDirLeaseForProcess(
 export declare function clearRecordsFromOtherMachines(
   dataDir: string,
 ): { path: string; host: string; pid: number }[];
+
+/** Who holds the data folder, for a diagnostic that must not refuse to start (server/doctor). */
+export declare function describeDataDirLease(dataDir: string):
+  | { state: "none"; path: string }
+  | { state: "invalid"; path: string }
+  | { state: "alive" | "dead" | "other-machine"; path: string; pid: number; host: string; createdAt: string };

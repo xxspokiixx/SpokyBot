@@ -127,6 +127,7 @@ const skillLibraryEntrySchema = z.object({
     sha256: z.string().regex(/^[a-f0-9]{64}$/),
     importedAt: z.string(),
     reviewState: z.enum(["approved", "disabled"]),
+    everyBot: z.boolean().optional(),
     license: z.string().optional(),
     compatibility: z.string().optional(),
     tags: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,23}$/)).max(8).optional(),
@@ -202,6 +203,7 @@ function librarySkillListing(root, entry) {
         name: entry.name,
         description: entry.description,
         enabled: entry.reviewState === "approved" && intact,
+        everyBot: entry.everyBot === true,
         editable: false,
         source: entry.source,
         sha256: entry.sha256,
@@ -214,6 +216,23 @@ function librarySkillListing(root, entry) {
             : [...entry.warnings, "stored SKILL.md changed after review — enablement is blocked"],
         skippedFiles: entry.skippedFiles,
     };
+}
+export function setLibrarySkillEveryBot(name, everyBot, root = skillsLibraryRoot()) {
+    if (!isSkillName(name))
+        return { error: "invalid skill name" };
+    const indexRead = readSkillLibraryIndexState(root);
+    if ("error" in indexRead)
+        return indexRead;
+    const entry = indexRead.index[name];
+    if (!entry)
+        return { error: `no library skill named "${name}"` };
+    if (everyBot)
+        entry.everyBot = true;
+    else
+        delete entry.everyBot;
+    writeSkillLibraryIndex(root, indexRead.index);
+    skillLibraryEvents.emit("invalidate", { kind: "every-bot", name });
+    return librarySkillListing(root, entry);
 }
 export function listLibrarySkills(root = skillsLibraryRoot()) {
     return Object.values(readSkillLibraryIndex(root))

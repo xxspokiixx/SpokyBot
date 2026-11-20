@@ -5,7 +5,6 @@ import { createHash } from "node:crypto";
 import { appendFileSync, closeSync, constants, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { open, readFile, stat, statfs as statfsAsync } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
-import { Header } from "tar";
 import { writeFileAtomic } from "./atomic.js";
 export const EVIDENCE_LIMITS = {
     imageBytes: 1_500_000,
@@ -61,6 +60,7 @@ export class BrowserEvidence {
     root;
     statfs;
     now;
+    freeFloor;
     counter = null;
     threadBytes = new Map();
     stepBytes = new Map();
@@ -73,10 +73,12 @@ export class BrowserEvidence {
     timer;
     unsubscribe;
     sweeping = null;
+    /** `freeFloor`: the free space below which no screenshot is kept, EVIDENCE_LIMITS.freeFloor unless a test scales it down. */
     constructor(options) {
         this.root = options.root;
         this.statfs = options.statfs ?? statfsAsync;
         this.now = options.now ?? Date.now;
+        this.freeFloor = options.freeFloor ?? EVIDENCE_LIMITS.freeFloor;
     }
     attach(deps) {
         this.deps = deps;
@@ -304,6 +306,7 @@ export class BrowserEvidence {
             out.once("drain", settle);
             out.once("close", closed);
         });
+        const { Header } = await import("tar");
         const entry = async (path, body, mtime) => {
             const bytes = Buffer.isBuffer(body) ? body.length : body.size;
             const block = Buffer.alloc(512);
@@ -408,7 +411,7 @@ export class BrowserEvidence {
         try {
             const fs = await this.statfs(this.root).catch(() => this.statfs(join(this.root, "..")));
             const free = Number(fs.bavail) * Number(fs.bsize);
-            this.budget = { cap: Math.min(EVIDENCE_LIMITS.totalBytes, Math.floor(free * EVIDENCE_LIMITS.freeShare)), low: free < EVIDENCE_LIMITS.freeFloor };
+            this.budget = { cap: Math.min(EVIDENCE_LIMITS.totalBytes, Math.floor(free * EVIDENCE_LIMITS.freeShare)), low: free < this.freeFloor };
         }
         catch { }
         const expired = this.now() - EVIDENCE_LIMITS.retentionMs;

@@ -27,7 +27,7 @@ export function ownerStamp(row, owner) {
     const answeredBy = { kind: "session", name: owner.name, person: owner.person, ...(card?.answeredBy?.via ? { via: card.answeredBy.via } : {}) };
     return { ...(line ? { sender: { name: owner.name, id: owner.person } } : {}), ...(card ? { card: { ...card, answeredBy } } : {}) };
 }
-/** A bot conversation's rows as My Cloud keeps them: the owner's own lines and answers carry the owner. */
+/** A conversation's rows as My Cloud keeps them: the owner's own lines and answers carry the owner. */
 export function stampOwner(rows, owner) {
     return rows.map((row) => {
         const stamp = ownerStamp(row, owner);

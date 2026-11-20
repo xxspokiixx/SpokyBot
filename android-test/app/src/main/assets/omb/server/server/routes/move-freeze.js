@@ -4,7 +4,7 @@
 // frozen server refuses here, before any other route.
 import { z } from "zod";
 import { PASS } from "./table.js";
-const freezeBody = z.object({ cloud: z.string().url().max(300).optional() });
+const freezeBody = z.object({ cloud: z.string().url().max(300).optional(), place: z.string().trim().min(1).max(120).optional() });
 const thawBody = z.object({ automations: z.literal("off").optional() });
 export function createMoveFreezeRoutes({ freeze, busy, restart, automationsOff }) {
     return async ({ req, res, path, method, auth, json, readBody }) => {
@@ -24,18 +24,18 @@ export function createMoveFreezeRoutes({ freeze, busy, restart, automationsOff }
                 return json(res, 403, { error: "Only SpokyBot on this computer can do this." });
             if (method === "GET") {
                 const who = busy();
-                const cloud = freeze.cloud();
-                return json(res, 200, { frozen: freeze.frozen(), ...(freeze.frozen() && cloud ? { cloud } : {}), ...(who === null ? {} : { busy: who }) });
+                const cloud = freeze.cloud(), place = freeze.place();
+                return json(res, 200, { frozen: freeze.frozen(), ...(freeze.frozen() && cloud ? { cloud } : {}), ...(freeze.frozen() && place ? { place } : {}), ...(who === null ? {} : { busy: who.name, what: who.what }) });
             }
             if (method === "POST") {
                 const body = freezeBody.safeParse(await readBody(req, 4096));
                 if (!body.success)
-                    return json(res, 400, { error: "send { cloud }: My Cloud's address" });
+                    return json(res, 400, { error: "send { cloud, place? }: the home's address, and its name when it is a server of the person's own" });
                 if (!freeze.frozen()) {
                     const who = busy();
                     if (who !== null)
-                        return json(res, 409, { error: "A bot is still working.", busy: who });
-                    freeze.freeze(body.data.cloud ?? null);
+                        return json(res, 409, { error: "A bot is still working.", busy: who.name, what: who.what });
+                    freeze.freeze(body.data.cloud ?? null, body.data.place ?? null);
                 }
                 return json(res, 200, { frozen: true });
             }

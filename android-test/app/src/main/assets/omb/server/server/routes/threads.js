@@ -1,12 +1,14 @@
-import { ATTACHMENTS_DIR, extensionForMime, FILE_MAX_BYTES, IMAGE_MAX_BYTES, parseAudioRange, readAttachment, saveFile, saveImageUpload, validateAttachmentUploadId, } from "../attachments.js";
+import { basename, join } from "node:path";
+import { ATTACHMENTS_DIR, deleteAttachment, extensionForMime, FILE_MAX_BYTES, IMAGE_MAX_BYTES, parseAudioRange, readAttachment, saveFile, saveImageUpload, validateAttachmentUploadId, } from "../attachments.js";
 import { deliveredCopy } from "../bot-attachment.js";
 import { memberBot, memberGroup } from "../bot-visibility.js";
 import { speakerOf } from "../replies.js";
-import { searchMessagesAsync } from "../message-db.js";
+import { readMessage, searchMessagesAsync } from "../message-db.js";
 import { listMessageFolder, messageAttachmentName, messageFileDisposition, messageFileDownloadName, messageFolderEntryName, messageImageTargetAt, messageReferencesFile, openMessageFile, openMessageFolderEntry, referencedFileName, } from "../message-file.js";
 import { resolveRequestAuth } from "../request-auth.js";
 import { createJobRoutes } from "./jobs.js";
 import { PASS } from "./table.js";
+const UPLOADED_NAME = /^[A-Za-z0-9-]+\.[A-Za-z0-9]{1,10}$/;
 export function createThreadRoutes(deps) {
     const { store, userName: userNameFor, sessions, groupUsageReader, lendingEnabled, hostedWorkspace: HOSTED_WORKSPACE, sessionCookie: SESSION_COOKIE, loopback: LOOPBACK, defaultPage: DEFAULT_PAGE, pageSize, messagePage, messageWindow, publicBotQueuedMessages, publicGroupState, wireBot, botComputerControlSnapshot, messageFileRootsForThread, viewerFor, visibleTo, } = deps;
     const jobs = createJobRoutes({ store, coordinator: deps.coordinator, groupThreadIsWorking: deps.groupThreadIsWorking, viewerFor, visibleTo, sessions });
@@ -41,7 +43,8 @@ export function createThreadRoutes(deps) {
                 botQueuedMessages: visible.everything ? queued : Object.fromEntries(Object.entries(queued).filter(([threadId]) => visible.thread(threadId))),
                 sections: visible.sections(store.sections),
                 groups: store.groups.filter((g) => visible.group(g.id)).map((g) => {
-                    const room = { ...publicGroupState(g), ...messagePage(g.threadId, limit) };
+                    const group = publicGroupState(g);
+                    const room = { ...(deps.groupFor?.(auth, group) ?? group), ...messagePage(g.threadId, limit) };
                     return visible.everything || !visible.member ? room : memberGroup(room);
                 }),
                 computerControl: Object.fromEntries(shownBots.map((bot) => {
@@ -91,9 +94,18 @@ export function createThreadRoutes(deps) {
             res.writeHead(200, {
                 "content-type": message.mime ?? "image/png",
                 "content-length": String(bytes.byteLength),
-                "cache-control": "private, max-age=31536000, immutable",
+                "cache-control": "private, no-store",
             });
             return res.end(bytes);
+        }
+        m = path.match(/^\/api\/threads\/([\w-]+)\/messages\/([\w-]+)\/tool$/);
+        if (m && method === "GET") {
+            if (!store.botByThread(m[1]) && !store.groupByThread(m[1]))
+                return json(res, 404, { error: "no such conversation" });
+            const message = readMessage(m[1], m[2]);
+            if (message?.tool?.output === undefined)
+                return json(res, 404, { error: "no tool output on that message" });
+            return json(res, 200, { output: message.tool.output });
         }
         // Only a file this exact stored message grants; deliberately not a general path reader.
         m = path.match(/^\/api\/threads\/([\w-]+)\/messages\/([\w-]+)\/file$/);
@@ -195,7 +207,7 @@ export function createThreadRoutes(deps) {
                 ...(streamsMessageImage
                     ? { "content-disposition": "inline" }
                     : { "content-disposition": messageFileDisposition(messageFileDownloadName(downloadName, file.name)) }),
-                "cache-control": streamsMessageImage ? "private, max-age=3600" : "private, no-store",
+                "cache-control": "private, no-store",
                 "cdn-cache-control": "no-store",
                 "cloudflare-cdn-cache-control": "no-store",
                 pragma: "no-cache",
@@ -276,6 +288,7 @@ export function createThreadRoutes(deps) {
                 });
                 req.on("error", (e) => fail(400, e instanceof Error ? e.message : String(e)));
             });
+            deps.uploads.note(auth, basename(saved.path));
             return json(res, 201, saved);
         }
         // Raw bytes; a UUID uploadId is stable across retries, and the quota rejects rather than delete files old prompts reference.
@@ -312,6 +325,7 @@ export function createThreadRoutes(deps) {
                 // Returning must not destroy the socket: the caller still sends the 4xx when the byte count crosses the limit.
                 const chunks = req.iterator({ destroyOnReturn: false });
                 const saved = await saveFile(chunks, name, rawType ?? "", { uploadId, expectedBytes: declaredLength });
+                deps.uploads.note(auth, basename(saved.path));
                 return json(res, 201, saved);
             }
             catch (error) {
@@ -321,6 +335,15 @@ export function createThreadRoutes(deps) {
         }
         // Name-locked to the attachments dir: readAttachment refuses anything but a bare generated filename.
         m = path.match(/^\/api\/attachments\/([\w.-]+)$/);
+        if (m && method === "DELETE") {
+            const name = m[1];
+            if (!UPLOADED_NAME.test(name) || !deps.uploads.owns(auth, name))
+                return json(res, 404, { error: "no such attachment" });
+            if (deps.attachmentInUse(name))
+                return json(res, 409, { error: "This file is already in a message, so it stays." });
+            deleteAttachment(join(ATTACHMENTS_DIR, name));
+            return json(res, 200, { ok: true });
+        }
         if (m && method === "GET") {
             const attachment = readAttachment(m[1]);
             if (!attachment)

@@ -10,6 +10,7 @@ import { classifyError } from "./drivers/retry.ts";
 import type { RoutineRun } from "./routines.ts";
 import { hostTimeZone } from "./turn-clock.ts";
 import { classifyContinuable } from "./turn-continuation.ts";
+import { namesOwnCause, outOfProcesses } from "./process-shortage.ts";
 
 export type RoutineOwnerCause = "signed_out" | "credits" | "usage_limit" | "setup";
 
@@ -83,6 +84,9 @@ export function classifyRoutineFailure(failure: string, facts: RoutineFailureFac
   if (facts.stopReason && NOT_RETRIED_STOPS.has(facts.stopReason)) return { kind: "final" };
   if (classifyContinuable(facts.stopReason, failure) === "cap") return { kind: "final" };
   if (facts.stalled) return { kind: "retry", cause: "stalled" };
+  // A spawn the machine refused is this server's shortage, not the AI's: retrying it on another model sends the person's
+  // work to a provider that will fail the same way.
+  if (outOfProcesses(failure) && !namesOwnCause(failure)) return { kind: "final" };
   const engine = engineFailureKind(failure);
   const { reason, transient } = classifyError({ text: failure });
   if (facts.trialCredit || (engine === "credits" && !facts.limit)) return { kind: "owner", cause: "credits" };

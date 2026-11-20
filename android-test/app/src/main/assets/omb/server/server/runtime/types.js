@@ -7,6 +7,6 @@ export const DEFAULT_LIMITS = {
     queueMs: 24 * 60 * 60_000,
     stallMs: 4 * 60 * 60_000,
     turnStallMs: 20 * 60_000,
-    inputWaitMs: 30 * 60_000,
+    inputWaitMs: Number.POSITIVE_INFINITY,
 };
 export const terminal = (status) => TERMINAL.includes(status);

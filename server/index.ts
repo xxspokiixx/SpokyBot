@@ -133,6 +133,7 @@ import {
   containerComputerStatus,
   containerExec,
   containerRuntimeStatus,
+  androidProotExec,
   localVmWakeAction,
   perBotLocalVmTarget,
   poolLocalVmTarget,
@@ -281,7 +282,7 @@ import { createCloudPower, registerCloudPower, wokeFromSleep, type CloudPower } 
 import { lentCopies, noteSyncBotTurn } from "./routes/cloud-sync.ts"; import { mcpReconnectLine, retryBrokeredMcp } from "./bot-box/broker-mcp.ts";
 import { CLOUD_PERSONAL_REFUSAL, type CloudOwnership } from "./cloud-owner.ts"; import { memberLoginRefusal, personalMoveRefusal } from "./cloud-team.ts"; import { createCloudTeamHost, type MemberProfile } from "./host/cloud-team-host.ts"; import { engineHomes } from "./engine-homes/engine-homes.ts"; import { audienceMember, layerId, memberAudience } from "./audience.ts"; import { createPersonRooms, createRoomReads, type OwnGroupFrames } from "./host/room-reads.ts"; import { createMeRoutes } from "./routes/me.ts"; import { createTeamPhoneRoutes } from "./routes/team-phone.ts"; import { settleCloudHome } from "./cloud-home-settle.ts"; import { CLOUD_OUTSIDE_KEY, outsideDriven } from "./cloud-sharing.ts";
 import { createCloudMoveRoutes } from "./cloud-move-http.ts";
-import { RESTART_EXIT_CODE } from "./restart.ts";
+import { RESTART_EXIT_CODE } from "./restart.ts"; import { installCrashGuard } from "./crash-guard.ts";
 import { applyIncludedXMessage, holdIncludedServices, researchCredential, trialCreditCredential, xCredential, xResearchStatus } from "./included-services.ts"; import { createResearchAvailability } from "./research.ts";
 import { CloudCreditProvider } from "./cloud-credit-provider.ts";
 import { createCreditMoves } from "./cloud-credit-moves.ts"; import { createRoutineHoldsHost } from "./host/routine-holds-host.ts";
@@ -414,7 +415,7 @@ import {
 } from "./system-prompt.ts";
 import { shellTimeoutHookResult } from "./shell-timeout-hint.ts";
 import { spillToolResult } from "./tool-result-spill.ts";
-import { gatedLocalComputer } from "./local-computer.ts";
+import { gatedLocalComputer, androidLocalComputerConnection, type LocalComputerConnection } from "./local-computer.ts";
 import { desktopComputer, thisComputerNotReady } from "./desktop-computer.ts";
 import { askToUseYourComputer, cancelYourComputerAsks, dismissStaleYourComputerCards, yourComputerCallFrom, yourComputerWaiting } from "./your-computer-consent.ts"; import { createComputerAsksHost } from "./host/computer-asks-host.ts";
 import { discoverExistingPerBotLocalVms, localVmInventoryEntry } from "./local-vm-inventory.ts";
@@ -500,7 +501,7 @@ import {
   presetFromDefaults,
 } from "./presets.ts";
 import { OrgLibrary } from "./org-library.ts";
-import { shouldMountLocalComputer } from "./local-routing.ts";
+import { localVmOffered, shouldMountLocalComputer } from "./local-routing.ts";
 import { autoLocalVmAttachable, type ContainerComputerStatus } from "./container-computer.ts";
 import { keepTransient, lazyClaimRetryText, settledWithin, startAutoVmClaim, withinBudget, type AutoVmClaimSlot, type AutoVmClaimTable } from "./auto-vm-claims.ts";
 import { CONTROL_ACT_WITHIN_MS, CONTROL_BUSY, CONTROL_HANDED_BACK, CONTROL_WAIT_MS, CONTROL_WAITED, controlRefusal, type ControlState } from "./control-client.ts";
@@ -518,7 +519,7 @@ import {
 import { createGracefulShutdown } from "./graceful-shutdown.ts";
 import { acquireDataDirLeaseForProcess } from "./data-dir-lease.ts";
 import { createWorkspaceAccess, describeEdition, editionForSettings, editionStatus, entitled, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, licenseWarning, sharedWorkspaceFullAccessConfigured, loadEnterpriseLayer, workspaceMembership, type WorkspaceAccess } from "./enterprise.ts";
-import { environmentDescriptor, loadEnvironmentId, serverVersion } from "./environment.ts";
+import { environmentDescriptor, loadEnvironmentId, serverVersion } from "./environment.ts"; import { dataFormatAtStart } from "./data-format.ts"; import { doctorAtStart, doctorSummary } from "./doctor/start.ts"; import { ModelManifestStore } from "./model-manifest/manifest.ts";
 import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
 import { createWorkspaceBackupRoutes, isWorkspaceBackupSessionControl } from "./workspace-backup-http.ts";
 import { applyPendingWorkspaceRestore, readLastWorkspaceRestore, type WorkspaceRestoreResult } from "./workspace-backup.ts";
@@ -581,6 +582,11 @@ import { createBotMemoryRoutes } from "./routes/bot-memory.ts";
 import { createBotCreateRoutes } from "./routes/bots-create.ts";
 import { createTeamOwnerRoutes } from "./routes/team-owners.ts";
 import { createBotSettingsRoutes } from "./routes/bot-settings.ts";
+import { createDoctorRoutes } from "./routes/doctor.ts";
+import { announcementRoutes } from "./routes/announcements.ts";
+import { createCheckBacks } from "./host/check-backs.ts"; import { writeCheckBackLine } from "./host/check-back-host.ts"; import { checkBackRefusal, createCheckBackRoutes, createCheckBackToolRoutes } from "./routes/check-backs.ts";
+import { createPhoneHoldRoutes } from "./routes/phone-hold.ts";
+import { createPhoneHold, PHONE_HOLD_WAIT_MS } from "./phone-hold.ts";
 import { createBotPatchRoutes } from "./routes/bot-patch.ts";
 import { createBotOrderRoutes } from "./routes/bot-order.ts";
 import { createBotLifecycleRoutes } from "./routes/bot-lifecycle.ts";
@@ -640,23 +646,36 @@ import { withScopeHint } from "./connector-scope-hint.ts";
 import { connectorRequestItems } from "./connector-request-items.ts";
 import { onThreadSeen, personAsks as personAskAt, sawThread } from "./thread-presence.ts"; import { createWarmSummaryHost, HARNESS_IDLE_FRACTION } from "./host/warm-summary-host.ts";
 
-// Crash diagnostics: log, then exit non-zero so a supervisor (Electron, the Android shell, systemd)
-// sees the failure. A synchronous throw during boot aborts module evaluation; without an explicit
-// exit the empty event loop would drain to code 0 and hide a fatal start (e.g. a held data-dir lease).
-process.on("unhandledRejection", (reason, promise) => {
-  console.error("[FATAL] Unhandled rejection at:", promise, "reason:", reason);
-  process.exit(1);
-});
-process.on("uncaughtException", (error) => {
+/** Returns the host computer connection for the current platform. On Android it reads from the app's userData directory. */
+function hostComputerConnection(): LocalComputerConnection | null {
+  if (process.platform === "android") {
+    const userData = process.env.OMB_USER_DATA;
+    return userData ? androidLocalComputerConnection(userData) : null;
+  }
+  return desktopComputer.connection();
+}
+
+// Crash diagnostics before the guard exists: a synchronous throw during boot aborts module evaluation, and without an
+// explicit exit the empty event loop would drain to code 0 and hide a fatal start (e.g. a held data-dir lease). The
+// guard (server/crash-guard.ts) replaces these once the shutdown path and the watchdog exist, so every error after
+// boot is judged there instead.
+function onBootException(error: unknown) {
   console.error("[FATAL] Uncaught exception:", error);
   process.exit(1);
-});
+}
+function onBootRejection(reason: unknown, promise: Promise<unknown>) {
+  console.error("[FATAL] Unhandled rejection at:", promise, "reason:", reason);
+  process.exit(1);
+}
+process.on("uncaughtException", onBootException);
+process.on("unhandledRejection", onBootRejection);
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
 const WEBHOOK_PUBLIC_URL = process.env.OMB_WEBHOOK_PUBLIC_URL || undefined;
 const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
 
+dataFormatAtStart("check", DATA_DIR, serverVersion());
 ensureDirs();
 // Acquire before any durable identity, sessions, config or Store state is loaded.
 const dataDirLease = acquireDataDirLeaseForProcess(DATA_DIR);
@@ -679,6 +698,8 @@ if (existsSync(join(DATA_DIR, ".backups"))) {
   if (workspaceRestore.restored) restoredAtStart = workspaceRestore.id;
   if (!workspaceRestore.restored && !workspaceRestore.rolledBack) workspaceRestore = readLastWorkspaceRestore(DATA_DIR) ?? workspaceRestore;
 }
+dataFormatAtStart("stamp", DATA_DIR, serverVersion());
+doctorAtStart(DATA_DIR, serverVersion()); // the first start of a version: safe repairs, before anything reads the data
 const workspaceMaintenance = new WorkspaceBackupMaintenance(), moveFreeze = createMoveFreeze({ dataDir: DATA_DIR, exportOnly: (process.env.OMB_CLOUD_ROLE === "home" || process.env.OMB_CLOUD_ROLE === "team") && process.env.OMB_CLOUD_EXPORT_ONLY === "1" });
 // Only after ensureDirs(), whose one-time legacy data-dir rename must not find ~/.openmausbot already there.
 const ENVIRONMENT_ID = loadEnvironmentId(DATA_DIR);
@@ -1465,6 +1486,14 @@ function resyncOpenCodeProviderKeys(): void {
 }
 const firstEngineRead = holdUntilFirstEngineRead();
 await registry.load(providerConfigs(), decorateHostedProvider);
+// The model list that can change without a new APK: it only ever adds or retires a model the drivers already run, and a
+// phone that never reaches the network keeps the copy this build shipped with.
+const modelManifest = new ModelManifestStore({ dataDir: DATA_DIR });
+if (!modelManifest.fetchDisabled) {
+  modelManifest.refreshInBackground();
+  // A list that names a model this build did not ship changes the pickers, so a client hears about it.
+  modelManifest.onChange(() => broadcast({ kind: "config", ...configStatus() }));
+}
 const bundledSkills = loadBundledSkills();
 const availableSkills = () => mergeSkills(bundledSkills, loadUserSkills(join(DATA_DIR, "skills")));
 /** Every turn the engine can mount it, whatever its words: they pick only the skill's instructions. A Cloud home or a hosted workspace has no USB port. */
@@ -1869,6 +1898,8 @@ function internalCapabilityIsActive(capability: InternalCapability): boolean {
 const MAX_COMMS_DEPTH = 1;
 const MAX_WORKSPACE_BOTS = 100;
 const phoneProxyPath = SPAWNED_PROXIES.phone;
+/** A person's hold on the phone the bots use (features.usbPhoneTakeover): on, every bot's call waits for the hand-back. */
+const phoneHold = createPhoneHold();
 
 const researchAvailability = createResearchAvailability({ credential: () => researchCredential(cfg.treg?.key) }); researchAvailability.available();
 function agentsIntegration(
@@ -5081,7 +5112,7 @@ function stoppedTurnText(threadId: string, turnId: string | undefined, cause?: s
 const watchdog = new TurnWatchdog({
   stallMs: TURN_STALL_MS, toolStallMs: TOOL_STALL_MS,
   checkMs: 60_000,
-  onStall: (turn, silentMs) => {
+  onStall: (turn, silentMs, reason) => {
     const stalledResourceOwner = turnResourceOwners.get(turn.threadId);
     const stalledGeneration = directTurnGenerationByThread.get(turn.threadId);
     const stalledProviderTurn = directRequestOwners.get(turn.threadId);
@@ -5092,10 +5123,15 @@ const watchdog = new TurnWatchdog({
     const bot = botForThread(turn.botId, turn.threadId);
     const routineRun = activeRoutineRunForThread(turn.threadId);
     void runningTurnInstance(bot, turn.threadId)?.adapter.interruptTurn(turn.threadId).catch(() => {});
-    const minutes = Math.round(silentMs / 60_000), cause = engineMemory.stallCause(turn.threadId, `no activity for ${minutes} minutes — the turn was stopped`);
+    const minutes = Math.round(silentMs / 60_000);
+    const cause = reason === "server-error"
+      ? engineMemory.stallCause(turn.threadId, "an unexpected error in the server stopped this turn (details in the server log)")
+      : engineMemory.stallCause(turn.threadId, `no activity for ${minutes} minutes — the turn was stopped`);
     const stalled = stoppedTurnText(turn.threadId, liveTurnByThread.get(turn.threadId), cause);
     if (routineRun?.target === "bot") {
-      routines?.failThread(turn.threadId, engineMemory.stallCause(turn.threadId, `No activity for ${minutes} minutes — the routine was stopped`), { cause: "stalled" });
+      routines?.failThread(turn.threadId, engineMemory.stallCause(turn.threadId, reason === "server-error"
+        ? "An unexpected error in the server stopped the routine (details in the server log)"
+        : `No activity for ${minutes} minutes — the routine was stopped`), { cause: "stalled" });
     }
     store.appendMessage(turn.threadId, {
       role: "bot",
@@ -5914,7 +5950,7 @@ async function mountHostComputer(owner: TurnOwner, botId: string, providerSuppor
       ? "bots can't use this computer on this system — choose another place for this bot to work"
       : "this bot's AI can't use this computer — pick another AI for this bot, or choose another place for it to work");
   }
-  const cua = desktopComputer.connection();
+  const cua = hostComputerConnection();
   if (!cua) throw new Error(thisComputerNotReady());
   await bindTurnComputer(owner, "computer:host");
   autoVmClaims.set(owner.threadId, {
@@ -6112,7 +6148,7 @@ async function computerPreviewSurface(bot: BotRecord, threadId?: string) {
     if (vm && (autoLocalVmAttachable(vm) || localVmUpdates.observe(target, vm))) return "vm";
   }
   if (!CLOUD_HOME && shouldMountLocalComputer({ requested: undefined, hostPlatform: process.platform,
-    providerSupportsLocal: instance?.adapter.capabilities.localComputerMcp === true }) && desktopComputer.connection()) return "local";
+    providerSupportsLocal: instance?.adapter.capabilities.localComputerMcp === true }) && hostComputerConnection()) return "local";
   if (bot.cloudBackend === "vps") return "cloud";
   return plan.browser ? "browser" : "off";
 }
@@ -6123,7 +6159,8 @@ async function selectableComputers(bot: BotRecord) {
   const caps = instance?.adapter.capabilities;
   const off = bot.computer === "off";
   const toolsLeaveOut = computerToolsRefusal(bot.toolScope, "works-on", bot.name)?.message;
-  const surfaces = (["cloud", "vm", "local", "browser"] as const).filter(surface => !CLOUD_HOME || cloudHomeOffersPlace(surface));
+  const surfaces = (["cloud", "vm", "local", "browser"] as const).filter(surface => (!CLOUD_HOME || cloudHomeOffersPlace(surface))
+    && (surface !== "vm" || localVmOffered()));
   let ownDesktopAwaitsUpdate = false;
   return withoutHostWhileUpdating(await Promise.all(surfaces.map(async surface => {
     let ready = false;
@@ -6165,7 +6202,7 @@ async function selectableComputers(bot: BotRecord) {
         reason = (updating ? LOCAL_VM_UPDATING_PROBLEM : status.problem) ?? reason;
       } else if (surface === "local") {
         ready = shouldMountLocalComputer({ requested: "local", hostPlatform: process.platform,
-          providerSupportsLocal: caps?.localComputerMcp === true }) && Boolean(desktopComputer.connection());
+          providerSupportsLocal: caps?.localComputerMcp === true }) && Boolean(hostComputerConnection());
       } else if (surface === "browser") {
         ready = browserSelectable(bot);
         reason = "The built-in browser is disabled, not installed, or unsupported by this model.";
@@ -8372,7 +8409,7 @@ async function beginTurn(
           providerSupportsLocal: mountsLocalComputer,
         })
       ) {
-        const cua = desktopComputer.connection();
+        const cua = hostComputerConnection();
         if (cua) {
           autoVmClaims.set(threadId, {
             owner: resourceOwner,
@@ -9075,6 +9112,20 @@ calendarCalls = new CalendarCallManager({
   onDue: deliverCalendarCall,
 });
 const botWaits = new WaitManager(createWaitHost({ store, directChat: directChatOf, threadBusy, wrote: markTaskContextExternallyUpdated, notify, enqueue: (input) => routines!.enqueueWebhook(input), cloudHome: Boolean(CLOUD_HOME) })); store.onChange((change) => { if (change.type === "bot" && store.bot(change.botId)?.busy) botWaits.noteBotBusy(change.botId); });
+// A bot's check_back: it comes back to the same conversation at a time it chose. The turn it starts is an ordinary one,
+// started for whoever's request set it, so on a Team Cloud the asker owns the run and a private chat stays private.
+const checkBacks = createCheckBacks({
+  dataDir: DATA_DIR,
+  alive: (botId, threadId) => Boolean(store.bot(botId) && store.taskByThread(botId, threadId)),
+  busy: (botId, threadId) => threadBusy(botId, threadId),
+  line: (record, line, messageId) => writeCheckBackLine(store, record, line, messageId, threadLanguage(record.threadId)),
+  start: async (record, prompt) => { await beginTurn(record.botId, prompt, { threadId: record.threadId, origin: record.origin, unattended: true }); },
+  paused: (error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    return /\bpaused\b|\bheld\b/i.test(message);
+  },
+  log: (text) => console.warn(text),
+});
 const recoveryOwners = routines.routineRequestReceiptOwners();
 if (recoveryOwners.length > 0) {
   const recoveryThreads = [...new Set(recoveryOwners.map((owner) => owner.threadId))];
@@ -12227,8 +12278,8 @@ const workspaceBackupAccess = {
       teamComputers.list().every(computer => !teamComputerInUse(computer)) &&
       store.bots.every((bot) => !botHasActiveTurn(bot.id) && !routines?.activeRunForBot(bot.id) && !botComputerControlSnapshot(bot.id).held) &&
       store.groups.every((group) => !groupIsWorking(group)),
-    pause: () => { routines?.stop(); calendarCalls?.stop(); botWaits.stop(); watchdog.stop(); memoryUpkeep.pause(); },
-    resume: () => { if (!moveFreeze.frozen()) { routines?.start(); calendarCalls?.start(); botWaits.start(); } watchdog.start(); memoryUpkeep.resume(); },
+    pause: () => { routines?.stop(); calendarCalls?.stop(); botWaits.stop(); checkBacks.stop(); watchdog.stop(); memoryUpkeep.pause(); },
+    resume: () => { if (!moveFreeze.frozen()) { routines?.start(); calendarCalls?.start(); botWaits.start(); checkBacks.start(); } watchdog.start(); memoryUpkeep.resume(); },
     flush: async () => {
       await Promise.all([flushAllProfileHistory(), flushAllMemoryJournals(), flushUsageLedger(DATA_DIR), flushDecisionLog(DATA_DIR), flushAdminActivity(DATA_DIR)]);
       // Writers gated and work idle: release the WAL connection for a consistent snapshot; Store reopens it lazily.
@@ -12307,7 +12358,7 @@ ROUTES.push(createBotSettingsRoutes({
 }));
 ROUTES.push(createBotOrderRoutes({ store, visibleFor: (auth) => visibleTo(viewerFor(auth)) }), createBotAccessRoutes({ team: CLOUD_TEAM, people: teamOwners.people, store, levelOf, wireBot, publicGroupState, broadcast, audienceChanged, record: (auth, row) => appendAdminAction(DATA_DIR, { ...row, actor: decisionActorFor(auth) }) }), accessRequests.routes);
 ROUTES.push(createBotPatchRoutes({
-  store, cfg, registry, sessions, browserRuntime, browserLive, memoryUpkeep, cacheKeepWarm, hostedModels, supportsApprovalMode,
+  store, turnBots: directTurnBots, cfg, registry, sessions, browserRuntime, browserLive, memoryUpkeep, cacheKeepWarm, hostedModels, supportsApprovalMode,
   routines: () => routines, activeVpsThreads,
   hostedWorkspace: HOSTED_WORKSPACE, hostedFullAccessRefusal: HOSTED_FULL_ACCESS_REFUSAL, desktopManaged: DESKTOP_MANAGED, maxWorkspaceBots: MAX_WORKSPACE_BOTS,
   broadcast, wireBot, publicGroupState, audienceChanged, storedAvatarExists, requestedTaskBot, threadBusy, activeGroupTurnForBot,
@@ -12321,6 +12372,14 @@ ROUTES.push(createBotLifecycleRoutes({
 ROUTES.push(createBotSkillsRoutes({ store, cfg, listBotSkills, readBotSkillFile, stagedSkillListing }));
 ROUTES.push(createHighLevelRoutes({ service: highlevel }));
 ROUTES.push(phones.routes);
+ROUTES.push(createDoctorRoutes({ dataDir: DATA_DIR, version: serverVersion, isAdmin: ownerOrAdmin }));
+ROUTES.push(createPhoneHoldRoutes({ hold: phoneHold, isAdmin: ownerOrAdmin }));
+ROUTES.push(announcementRoutes);
+ROUTES.push(createCheckBackRoutes({
+  checkBacks,
+  sees: (auth: RequestAuth, threadId: string) => threadShown(auth)(threadId),
+  refusal: (auth: RequestAuth, threadId: string, messageId: string) => cardAnswerRefusal(auth, threadId, messageId, "allow"),
+}));
 ROUTES.push(createSkillShareRoutes({ enabled: () => skillsHost.mode() !== "off", botExists: (id) => Boolean(store.bot(id)),
   cardRefusal: (auth, threadId, requestId) => cardAnswerRefusal(auth, threadId, requestId, "allow"), shareFromReceipt: skillsHost.shareFromReceipt, shareFromBot: skillsHost.shareFromBot }));
 ROUTES.push(createTeamContextRoutes({ store, teamMemory }));
@@ -12573,6 +12632,7 @@ ROUTES.push(createStatusRoutes({
   sharedWorkspaceFullAccessEnabled, adminActivityRecording, configStatus, broadcast, threadShown,
   browserEngineInstall: { get: () => browserEngineInstall, set: (install) => { browserEngineInstall = install; } },
   browserEngineInstallError: { set: (error) => { browserEngineInstallError = error; } },
+  doctor: doctorSummary,
 }));
 
 ROUTES.push(desktopViewer.route);
@@ -13365,10 +13425,44 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       if (method === "POST" && path === "/api/internal/phone/claim") {
         requireActiveInternalCapability();
+        // A person holds the phone: the call is refused with a 423 and words for the bot, then it waits for the hand-back
+        // unless the body says `wait: false` (a call in the middle of a batch, which cannot wait).
+        if (phoneHold.held) {
+          const body = await readInternalBody().catch(() => null) as { wait?: unknown } | null;
+          if (body?.wait === false) return json(res, 423, { error: "a person is holding the phone" });
+          const outcome = await phoneHold.wait(AbortSignal.timeout(PHONE_HOLD_WAIT_MS), PHONE_HOLD_WAIT_MS);
+          if (outcome !== "handed-back") return json(res, 423, { error: "a person is holding the phone" });
+          if (!claimTurnResource(internalCapability, "computer:phone")) return json(res, 409, { error: "another thread is using the phone" });
+          return json(res, 200, { claimed: true, waited: true });
+        }
         if (!claimTurnResource(internalCapability, "computer:phone")) {
           return json(res, 409, { error: "another thread is using the phone" });
         }
         return json(res, 200, { claimed: true });
+      }
+      // A bot's check_back: set, list or cancel. Who may: the person's own request behind this turn, in their one-to-one
+      // chat, which is the same rule a wait follows.
+      if (method === "POST" && path === "/api/internal/check-backs") {
+        return dispatchRoutes([createCheckBackToolRoutes({
+          checkBacks,
+          requireActive: () => requireActiveInternalCapability(),
+          botId: () => internalCapability.botId,
+          threadId: () => internalCapability.threadId,
+          refusal: () => checkBackRefusal({
+            owned: Boolean(directRequestOwners.get(internalCapability.threadId)),
+            room: Boolean(store.groupByThread(internalCapability.threadId)),
+            depth: internalCapability.depth ?? 0,
+            // No stored mark for a hand-off on a task here: the origin and depth cover every case this fork has.
+            handedOff: false,
+            routineRun: Boolean(store.taskByThread(internalCapability.botId, internalCapability.threadId)?.routineRunId),
+            outsideDriven: directRequestOwners.get(internalCapability.threadId)?.origin?.kind === "outside",
+            personStarted: directRequestOwners.get(internalCapability.threadId)?.origin?.kind === "user",
+            guest: false,
+          }),
+          zone: () => hostTimeZone(),
+          origin: () => directRequestOwners.get(internalCapability.threadId)?.origin ?? OUTSIDE,
+          readBody: () => readInternalBody(),
+        })], { req, res, url, path, method, auth, json, readBody });
       }
       // Off: a 404 like a route that never existed. On: a turn sees only the computers of the person it provably acts for.
       if (method === "GET" && path === "/api/internal/shared-computers" && lendingEnabled()) {
@@ -13478,6 +13572,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const body = await readInternalBody();
         try {
+          const command = typeof body.command === "string" ? body.command : "";
+          const timeoutSeconds = typeof body.timeout_seconds === "number" ? body.timeout_seconds : undefined;
+          // Android uses proot, not Docker/Podman
+          if (process.platform === "android") {
+            requireActiveInternalCapability();
+            const result = await androidProotExec(command, { timeoutSeconds });
+            return json(res, 200, result);
+          }
           const vm = await attachmentVmForTurn(internalCapability);
           if (!vm) return json(res, 409, { error: "You have no Local VM desktop in this turn, so there is nowhere to run a command." });
           const runtime = (await containerRuntimeStatus()).runtime;
@@ -13486,10 +13588,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               botComputerControlSnapshot(internalSender.id).held) {
             return json(res, 409, { error: "The Local VM is no longer available to this turn." });
           }
-          const result = await containerExec(vm, typeof body.command === "string" ? body.command : "", {
-            runtime,
-            timeoutSeconds: typeof body.timeout_seconds === "number" ? body.timeout_seconds : undefined,
-          });
+          const result = await containerExec(vm, command, { runtime, timeoutSeconds });
           localVmIdleFor(vm).touch();
           return json(res, 200, result);
         } catch (error) {
@@ -15672,7 +15771,7 @@ server.listen(PORT, "127.0.0.1", async () => {
     if (companyShutdown) return;
   }
   // Only once every registry is initialized and the endpoint listens: earlier dispatch can hit uninitialized bindings.
-  moveFreeze.hold(() => { routines!.start(); botWaits.start(); proactive.start(); }, () => { routines!.stop(); botWaits.stop(); proactive.stop(); });
+  moveFreeze.hold(() => { routines!.start(); botWaits.start(); checkBacks.start(); proactive.start(); }, () => { routines!.stop(); botWaits.stop(); checkBacks.stop(); proactive.stop(); });
   limitClock.start();
   moveFreeze.hold(() => memoryUpkeep.start(), () => memoryUpkeep.stop());
 });
@@ -15725,6 +15824,8 @@ const gracefulShutdown = createGracefulShutdown({
       revokeAllInternalCapabilities();
       sharedComputers.close(); deviceLinks.close(); stopCloudTeamPolicy();
       phones.close();
+      phoneHold.stop();
+      checkBacks.stop();
       sharedComputerControl.close();
       browserLive.closeAll();
       desktopViewer.closeAll();
@@ -15785,6 +15886,25 @@ const gracefulShutdown = createGracefulShutdown({
   },
 });
 
+// From here on every error nothing caught is judged, so a bad callback stops only its own turn instead of ending the
+// server and every turn in flight with it.
+process.off("uncaughtException", onBootException);
+process.off("unhandledRejection", onBootRejection);
+installCrashGuard({
+  failTurn: (turn) => watchdog.fail(turn.threadId),
+  redact: redactSecretsInText,
+  log: (line) => console.error(line),
+  shutdown: (code) => {
+    // Fatal: no flush of what memory holds (ledgers, journals, sessions, bus, registries); running turns stay "running"
+    // in the runtime store, so the next start reruns them. Engines are stopped so none is orphaned.
+    companyShutdown = true;
+    try { noteTurnsCutByShutdown(); } catch { /* best effort */ }
+    void Promise.race([registry.disposeAll(), new Promise((done) => setTimeout(done, 5_000))])
+      .catch(() => {})
+      .finally(() => { releaseDataDirLeaseAtExit(); process.exit(code); });
+  },
+});
+
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.on(signal, gracefulShutdown);
+  process.on(signal, () => gracefulShutdown());
 }

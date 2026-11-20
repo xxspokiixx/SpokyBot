@@ -6,10 +6,17 @@ import { answerConnection, connectionFingerprints, highlevelDigest, launchersOnP
 import { createConnectionPrompt } from "./cloud-connections-prompt.js";
 import { movedFrom } from "./cloud-send-arrived.js";
 import * as composio from "./composio.js";
+import { brokerAccess } from "./composio-broker-access.js";
 import { adoptComposioShare, adoptOwnComposio, composioIdentity, composioShareCode } from "./composio-share.js";
 import { isRemoteMcpServer, parseStoredMcpServer } from "./mcp-registry.js";
 import { personalConnectionRefusal } from "./cloud-team.js";
 import { createCloudConnectionRoutes } from "./routes/cloud-connections.js";
+const managedService = () => { try {
+    return brokerAccess() !== null;
+}
+catch {
+    return false;
+} };
 export function createCloudConnectionsHost(deps) {
     const label = (process.env.OMB_ENVIRONMENT_LABEL?.trim() || hostname()).slice(0, 120).trim() || "the person's computer";
     const computer = { environmentId: deps.environmentId, label };
@@ -28,9 +35,11 @@ export function createCloudConnectionsHost(deps) {
         fingerprints: (nonce) => connectionFingerprints(nonce, sources()),
         routes: createCloudConnectionRoutes({
             cloudHome: deps.cloudHome !== null,
+            ...(deps.ownHome ? { ownHome: deps.ownHome } : {}),
             ...(deps.cloudHome?.team ? { personalRefusal: (what) => personalConnectionRefusal(deps.cloudHome.team, what) } : {}),
             async list() {
-                return { computer, connections: await connections(), engines: await deps.engines().catch(() => []), commands: commands ??= launchersOnPath() };
+                return { computer, connections: await connections(), engines: await deps.engines().catch(() => []), commands: commands ??= launchersOnPath(),
+                    ...(deps.cloudHome === null && !managedService() ? { managedApps: false } : {}) };
             },
             adoptShare: adoptComposioShare,
             adoptOwn: (apiKey, userId) => adoptOwnComposio(deps.config(), apiKey, userId),

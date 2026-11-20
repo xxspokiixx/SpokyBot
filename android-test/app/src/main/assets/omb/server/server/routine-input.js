@@ -17,8 +17,6 @@ export function sanitizeInput(input, after) {
     if (target !== "bot" && target !== "room-goal")
         throw new Error("Choose a valid routine target");
     const groupId = typeof input.groupId === "string" ? input.groupId.trim() : "";
-    if (target === "room-goal" && !groupId)
-        throw new Error("Choose a room for this goal");
     const runOn = input.runOn ?? "maus";
     if (runOn !== "maus" && runOn !== "cloud")
         throw new Error("Choose where this routine runs");
@@ -56,7 +54,7 @@ export function sanitizeInput(input, after) {
         prompt,
         target,
         botId,
-        groupId: target === "room-goal" ? groupId : undefined,
+        groupId: target === "room-goal" && groupId ? groupId : undefined,
         runOn,
         enabled: input.enabled !== false,
         schedule,

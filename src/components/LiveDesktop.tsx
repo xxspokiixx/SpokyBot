@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Hand, Loader2, Minimize2, RefreshCw, Send } from "lucide-react";
+import { Hand, Loader2, Minimize2, RefreshCw } from "lucide-react";
 import type RFB from "@novnc/novnc";
 import { cn } from "@/lib/cn";
-import { connectDesktop, typeOnDesktop } from "@/lib/desktop-connection";
+import { connectDesktop } from "@/lib/desktop-connection";
 import { t } from "@/lib/i18n";
 import { useCaptionChrome, useDesktopCapabilities } from "./DesktopCapabilities";
+import { SoftKeyboardButton, SoftKeyboardField, useSoftKeyboard, useTapRaisesKeyboard } from "./SoftKeyboard";
 
 type Connection = "connecting" | "connected" | "disconnected";
 
@@ -26,12 +27,13 @@ export function LiveDesktop({ target, threadId, name, poster, expanded, onExpand
   const rfb = useRef<RFB | null>(null);
   const [connection, setConnection] = useState<Connection>("connecting");
   const [attempt, setAttempt] = useState(0);
-  const [text, setText] = useState("");
   const live = useRef(false);
   const { dragProps, noDragStyle } = useCaptionChrome();
   const macInset = useDesktopCapabilities().capabilities.windowChrome === "mac-inset";
   const unreachable = useRef(onUnreachable);
   unreachable.current = onUnreachable;
+  const keyboard = useSoftKeyboard(() => (connection === "connected" ? rfb.current : null));
+  const tapKeyboard = useTapRaisesKeyboard(() => connection === "connected", keyboard.raise);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -93,32 +95,12 @@ export function LiveDesktop({ target, threadId, name, poster, expanded, onExpand
         <header {...dragProps} className={cn("flex shrink-0 flex-wrap items-center gap-2 border-b border-hairline/40 bg-panel px-3 py-2", macInset && "pl-[86px]")}>
           <span className="min-w-0 truncate text-[13px] font-medium text-ink">{label}</span>
           {pill}
-          <form
+          <button
+            type="button"
             style={noDragStyle}
-            className="ml-auto flex min-w-0 items-center gap-1"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (!rfb.current || connection !== "connected" || !text) return;
-              typeOnDesktop(rfb.current, text);
-              setText("");
-            }}
+            onClick={() => onExpandedChange(false)}
+            className={cn(iconButton, "ml-auto bg-control text-ink hover:bg-raised-hover")}
           >
-            <input
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              maxLength={4096}
-              autoComplete="off"
-              autoCapitalize="off"
-              spellCheck={false}
-              placeholder={t("desktopViewer.text")}
-              aria-label={t("desktopViewer.text")}
-              className="w-44 min-w-0 rounded-lg border border-hairline bg-inset px-2.5 py-1.5 text-[12px] text-ink outline-none focus:border-focus max-sm:w-28"
-            />
-            <button type="submit" disabled={connection !== "connected" || !text} title={t("desktopViewer.send")} aria-label={t("desktopViewer.send")} className={cn(iconButton, "bg-control text-ink hover:bg-raised-hover")}>
-              <Send size={14} aria-hidden="true" />
-            </button>
-          </form>
-          <button type="button" style={noDragStyle} onClick={() => onExpandedChange(false)} className={cn(iconButton, "bg-control text-ink hover:bg-raised-hover")}>
             <Minimize2 size={14} aria-hidden="true" />
             <span className="max-sm:hidden">{t("desktopViewer.exitFullscreen")}</span>
           </button>
@@ -132,7 +114,11 @@ export function LiveDesktop({ target, threadId, name, poster, expanded, onExpand
         {poster && connection !== "connected" && (
           <img src={poster} alt="" aria-hidden="true" className="absolute inset-0 h-full w-full object-contain opacity-50" />
         )}
-        <div ref={screen} role="application" aria-label={label} className="absolute inset-0" />
+        <div ref={screen} role="application" aria-label={label} className="absolute inset-0" {...tapKeyboard} />
+        <SoftKeyboardField keyboard={keyboard} />
+        <div className="absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5">
+          <SoftKeyboardButton keyboard={keyboard} className="flex size-9 items-center justify-center rounded-lg bg-black/60 text-white backdrop-blur focus-visible:outline-2 focus-visible:outline-focus" />
+        </div>
         {connection === "connecting" && (
           <div role="status" className="pointer-events-none absolute inset-0 flex items-center justify-center gap-2 text-[12px] text-ink-secondary">
             <Loader2 size={16} className="animate-spin" aria-hidden="true" />

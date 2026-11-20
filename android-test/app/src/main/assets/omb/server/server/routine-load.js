@@ -4,6 +4,7 @@ import { z } from "zod";
 import { ROUTINE_CHECKS } from "../shared/routines.js";
 import { ROUTINE_PARTS } from "./package-parts.js";
 import { loadAttachments, loadTimeoutMinutes } from "./routine-attachments.js";
+import { isRoutineHoldCause } from "./routine-holds.js";
 import { MAX_DATE_MS } from "./routine-intervals.js";
 import { loadSchedule } from "./routine-schedules.js";
 const persistedSourceThreadId = z.string().trim().min(1).optional().catch(undefined);
@@ -90,9 +91,10 @@ export function loadRoutine(routine, now) {
         checkedAt: instant(routine.checkedAt),
         checkTrouble: typeof routine.checkTrouble === "string" && routine.checkTrouble ? routine.checkTrouble.slice(0, 300) : undefined,
         wakeAt: instant(routine.wakeAt),
+        heldFor: isRoutineHoldCause(routine.heldFor) ? routine.heldFor : undefined,
     };
     delete loaded.failureStreak;
-    return withCheckFields(withoutUndefined(loaded, ["timeoutMinutes", "runOnStartup", "installedPackage", "checkedAt", "checkTrouble", "wakeAt"]));
+    return withCheckFields(withoutUndefined(loaded, ["timeoutMinutes", "runOnStartup", "installedPackage", "checkedAt", "checkTrouble", "wakeAt", "heldFor"]));
 }
 export function loadRun(run) {
     const target = loadTarget(run.target);
@@ -111,4 +113,19 @@ export function loadRun(run) {
         checkKey: typeof run.checkKey === "string" && /^[\w-]{1,128}$/.test(run.checkKey) ? run.checkKey : undefined,
     };
     return withoutUndefined(loaded, ["timeoutMinutes", "access", "deliver", "checkKey"]);
+}
+const REQUEST_ACTIONS = new Set(["create", "update", "pause", "resume", "run_now", "delete"]);
+/** The applied routine-request receipts routines.json holds, each whole: one with a field out of shape is dropped. */
+export function loadRequestReceipts(value) {
+    if (!Array.isArray(value))
+        return [];
+    return value.filter((receipt) => typeof receipt?.requestId === "string" &&
+        typeof receipt?.messageId === "string" &&
+        typeof receipt?.botId === "string" &&
+        typeof receipt?.threadId === "string" &&
+        REQUEST_ACTIONS.has(receipt?.action) &&
+        receipt?.fingerprintVersion === 1 &&
+        typeof receipt?.fingerprint === "string" && /^[a-f0-9]{64}$/.test(receipt.fingerprint) &&
+        typeof receipt?.resultId === "string" &&
+        Number.isFinite(receipt?.appliedAt));
 }

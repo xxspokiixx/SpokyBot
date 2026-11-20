@@ -4,6 +4,7 @@
 // its arguments and its environment go through untouched, so every host that is not a Cloud home behaves as before.
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { engineInstallRoots } from "../engine-roots.js";
 import { SERVER_ROOT, resolveProxy } from "../proxy-paths.js";
 import { bridgedCommand } from "./bridge.js";
 import { brokerRewrite } from "./broker-env.js";
@@ -51,7 +52,7 @@ export class BoxRunner {
         const mutate = this.options.setup.mutate;
         const env = mutate?.has("env-all")
             ? Object.fromEntries(Object.entries(request.env).filter((entry) => entry[1] !== undefined))
-            : boxEnvironment(request.env, this.options.denyEnv);
+            : boxEnvironment(request.env, this.options.denyEnv, new Set(request.allowEnv ?? []));
         if (plan.net === "isolated") {
             const proxy = `http://127.0.0.1:${this.options.egressPort ?? BOX_EGRESS_PORT}`;
             for (const name of ["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"])
@@ -63,7 +64,9 @@ export class BoxRunner {
         const bridges = plan.net === "isolated" ? this.options.setup.bridges : [];
         const inner = bridgedCommand(this.options.bridge, bridges, request.command, request.args);
         const brokered = this.broker(env, plan, request);
-        return { command: this.options.bwrap, args: [...bwrapArgs(plan), "--", inner.command, ...inner.args], env: brokered.env, plan, token: brokered.token, release: brokered.release, unbrokered: brokered.unbrokered, extraFds };
+        const vouched = (request.allowEnv ?? []).filter((name) => /(?:KEY|TOKEN|SECRET)$/.test(name) && brokered.env[name] !== undefined && brokered.env[name] === request.env[name]);
+        const unbrokered = [...new Set([...brokered.unbrokered, ...vouched])];
+        return { command: this.options.bwrap, args: [...bwrapArgs(plan), "--", inner.command, ...inner.args], env: brokered.env, plan, token: brokered.token, release: brokered.release, unbrokered, extraFds };
     }
     /** Keys become a per-process token when the broker is on and the box has its own network (the bridge to the broker). */
     broker(env, plan, request) {
@@ -153,7 +156,7 @@ export class BotBox {
         this.runner = new BoxRunner({
             bwrap: this.detection.tools.bwrap,
             bridge: { socat: this.detection.tools.socat, bridgeScript: BOX_BRIDGE_SCRIPT, node: process.execPath },
-            setup: { dataDir: options.dataDir, home: options.home, codeRoots: options.codeRoots ?? defaultCodeRoots(), bridges },
+            setup: { dataDir: options.dataDir, home: options.home, codeRoots: options.codeRoots ?? defaultCodeRoots(), engineRoots: options.engineRoots ?? engineInstallRoots(options.dataDir), bridges },
             denyEnv: options.denyEnv, seccompFile: this.seccompFile,
             broker: { port: BOX_BROKER_PORT, mintForProcess: this.credentials.mintForProcess, revoke: this.credentials.revoke },
         });
@@ -186,7 +189,7 @@ export class BotBox {
     browserBox(seccompFd, ro) {
         if (!this.runner || !this.detection.tools)
             return null;
-        const setup = this.runner.setup;
+        const setup = { ...this.runner.setup, engineRoots: [] };
         const seccomp = this.seccompFile && !setup.mutate?.has("no-seccomp") ? this.seccompFile : null;
         const plan = planBox({ ...setup, seccompFd: seccomp ? seccompFd : undefined }, { command: "chrome", args: [], env: {}, net: "shared", ro });
         const home = resolve(setup.home), dataDir = resolve(setup.dataDir);

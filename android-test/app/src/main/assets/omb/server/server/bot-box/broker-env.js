@@ -10,7 +10,7 @@ export const BROKERED_PROVIDERS = [
 ];
 /** Keys the box would otherwise carry raw: named in the report when present. */
 export const UNBROKERED_KEY_ENV = [
-    "XAI_API_KEY", "MISTRAL_API_KEY", "CEREBRAS_API_KEY", "GROQ_API_KEY", "META_API_KEY", "MINIMAX_API_KEY", "KIMI_API_KEY", "MOONSHOT_API_KEY",
+    "XAI_API_KEY", "MISTRAL_API_KEY", "CEREBRAS_API_KEY", "GROQ_API_KEY", "GREENFERENCE_API_KEY", "META_API_KEY", "MINIMAX_API_KEY", "KIMI_API_KEY", "MOONSHOT_API_KEY",
     "CURSOR_API_KEY", "CURSOR_AUTH_TOKEN", "FACTORY_API_KEY", "CLINE_API_KEY", "OPENCODE_API_KEY", "OPENROUTER_API_KEY",
 ];
 /** A key's value that already is a broker token (a re-wrap, a self-check) is left alone. */

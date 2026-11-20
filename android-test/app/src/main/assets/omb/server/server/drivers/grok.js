@@ -10,6 +10,8 @@ const MODELS = {
         { id: "grok-3-mini", label: "Grok 3 Mini" },
     ],
 };
+/** Read by scripts/generate-model-manifest.mjs, so the bundled manifest carries exactly the lists this build can run. */
+export const STATIC_GROK_MODELS = MODELS;
 function decodeConfig(raw) {
     const config = (raw ?? {});
     if (config.tools !== undefined && typeof config.tools !== "boolean")

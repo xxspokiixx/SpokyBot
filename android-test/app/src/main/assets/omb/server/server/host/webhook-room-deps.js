@@ -11,8 +11,6 @@ function roomPostProblem(bot, group, verdict) {
         return `@${bot.name} reaches that bot in a one-to-one channel; a webhook room post needs a room`;
     if (verdict.problem === "not-member")
         return `@${bot.name} is not a member of the room “${group.name}”. Add @${bot.name} to the room, or point the webhook at a room it is in.`;
-    if (verdict.problem === "outsider")
-        return `the room “${group.name}” includes @${verdict.name}, who is outside @${bot.name}'s section, so @${bot.name} cannot post there`;
     return `the room “${group.name}” is still being set up — it cannot receive messages yet`;
 }
 const ROOM_GONE = "The room this webhook posts to no longer exists. Point the webhook at another room, or delete it.";

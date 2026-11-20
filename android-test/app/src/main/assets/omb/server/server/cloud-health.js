@@ -25,7 +25,7 @@ const IMAGE = /^[\w./:@+-]{1,300}$/;
 const match = (pattern, value) => typeof value === "string" && pattern.test(value) ? value : null;
 /** Stop reasons a driver settles a failed turn with. Free text never becomes a code. */
 const STOP_CODES = new Set(["auth_required", "rpc_error", "shutdown_timeout", "provider_safety", "update_required", "spawn_error", "quota",
-    "exit_before_result", "error_during_execution", "error", "failed"]);
+    "tool_error", "exit_before_result", "error_during_execution", "error", "failed"]);
 /** Stops that say only that something failed: the cause's own class, when known, says more. */
 const GENERIC_STOPS = new Set(["rpc_error", "error", "failed", "error_during_execution", "exit_before_result"]);
 /** Engine stops that count as a failure even when no failed row was written for them. */
@@ -33,6 +33,7 @@ const ROWLESS_STOPS = new Set(["shutdown_timeout", "auth_required", "update_requ
 /** Causes the server writes itself, by fixed code. */
 const FIXED_CAUSES = [
     [/ran out of memory while \d+ tasks? ran at once/, "out_of_memory"],
+    [/^Ran out of room, so I (closed the browser|stopped this task) to keep everything else running\./, "out_of_memory"],
     [/^no activity for \d+ minutes — the turn was stopped$/, "stalled"],
     [/^turn interrupted — SpokyBot restarted$/, "restart"],
     [/could not start — /, "could_not_start"],
@@ -277,12 +278,13 @@ export function createCloudHealth(deps) {
         noteRoutineRun: ledger.noteRoutineRun,
         report(after) {
             const read = ledger.read(after);
-            const memory = memoryBytes(), browser = deps.browser();
+            const memory = memoryBytes(), browser = deps.browser(), first = deps.firstHour?.();
             const base = {
                 v: 1, version, image, bootedAt: ledger.bootedAt, at: now(),
                 turns: read.turns, routines: read.routines, engines: engines(), connectors: connectorState(),
                 browser: { available: browser.available, installing: browser.installing, interrupted: browser.interrupted },
                 box: boxSummary(deps.box?.()),
+                firstHour: first?.firstHour ?? null, value: first?.value ?? null, room: deps.room?.() ?? null,
                 system: { ...memory, rssBytes: process.memoryUsage.rss(), load1: loadavg()[0] ?? 0, cpus: availableParallelism(), disk: diskBytes(deps.dataDir), eventLogWritable: writable(deps.eventsDir) },
             };
             let budget = CLOUD_HEALTH_MAX_BYTES - JSON.stringify({ ...base, cursor: ledger.cursor(read.seq), truncated: true, incidents: [] }).length;

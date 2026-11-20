@@ -13,8 +13,8 @@ import {
 } from "@/lib/team-map";
 import { cn } from "@/lib/cn";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { useCaptionChrome } from "@/components/DesktopCapabilities";
-import { placeOffered } from "@/lib/place";
+import { useCaptionChrome, useDesktopCapabilities } from "@/components/DesktopCapabilities";
+import { localVmOffered, placeOffered } from "@/lib/place";
 import { TeamCanvas } from "./TeamCanvas";
 import { MapModeToggle, TeamOrgChart, useMapMode } from "./TeamOrgChart";
 import { useTeamPeople } from "@/state/team-people";
@@ -269,6 +269,7 @@ const SENT_HIGHLIGHT_MS = 1_400;
 export function TeamMapPage() {
   const { state, dispatch } = useStore();
   const { dragProps } = useCaptionChrome();
+  const { capabilities } = useDesktopCapabilities();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const teamPeople = useTeamPeople();
   const admin = useOwnerOrAdmin();
@@ -381,7 +382,7 @@ export function TeamMapPage() {
             }}>
               <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] hover:bg-control" onClick={() => setTeamEditor({})}><Users size={14} />{t("team.create")}</button>
               <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] hover:bg-control" onClick={() => { setComputersOpen(true); setCreateComputerRequest((value) => value + 1); }}><Box size={14} />{t("canvas.cloudComputer")}</button>
-              {placeOffered("vm", state.config) && <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] hover:bg-control" onClick={() => dispatch({ type: "toggleAppSettings", section: "computer", open: true })}><Monitor size={14} />{t("canvas.localVm")}</button>}
+              {placeOffered("vm", state.config) && localVmOffered(capabilities.host.platform) && <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] hover:bg-control" onClick={() => dispatch({ type: "toggleAppSettings", section: "computer", open: true })}><Monitor size={14} />{t("canvas.localVm")}</button>}
             </div>
           </details>}
         </div>}

@@ -2,7 +2,7 @@
 // person's own treg key the calls go straight to treg, billed to their treg balance, with no limits from this side;
 // otherwise they go through the SpokyBot Cloud Admin's research relay (its `/research/*` routes under the plan's X relay
 // URL), within the plan's monthly research budget.
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { dollarsText, readCapped, tregAuthHeaders, tregErrorFor, X_MESSAGES, XResearchError } from "./x-research.js";
 /** A catalog id, or a hub tool's versioned id; never a path or a URL (those would reach a team's own tools). */
 export const RESEARCH_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,159}(?:@[A-Za-z0-9._-]{1,40})?$/;
@@ -12,9 +12,12 @@ const TIMEOUT_MS = 60_000;
 const QUERY_METHODS = new Set(["GET", "HEAD", "DELETE"]);
 /** A search answer stays readable: a long parameter list is on the endpoint's own page. */
 const PARAMS_IN_SEARCH = 1_500;
+/** What a bot does when research is off: says so and offers another way, never quietly works around it. */
+const RESEARCH_INSTEAD = "Tell the person research isn't available here and offer another way, such as web search or the browser; their own treg key in Settings → API keys turns research on.";
 export const RESEARCH_MESSAGES = {
     unavailable: "Research is temporarily unavailable. Try again shortly.",
-    notOffered: "SpokyBot Cloud doesn't offer research yet. A treg key in Settings → API keys works now.",
+    notOffered: `SpokyBot Cloud doesn't offer research yet. ${RESEARCH_INSTEAD}`,
+    off: `Research isn't on for this SpokyBot Cloud plan right now, so research_search and research_call can't be used. ${RESEARCH_INSTEAD}`,
 };
 const isRow = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 const text = (value) => (typeof value === "string" && value.trim() ? value : undefined);
@@ -95,7 +98,9 @@ function relayError(status, body) {
     const said = isRow(body) && typeof body.message === "string" ? body.message.slice(0, 400) : undefined;
     const code = isRow(body) ? body.error : undefined;
     if (status === 404 && (code === "not_found" || !said))
-        return new XResearchError("unavailable", RESEARCH_MESSAGES.notOffered);
+        return new XResearchError("off", RESEARCH_MESSAGES.notOffered);
+    if (researchIsOff(status, body))
+        return new XResearchError("off", status === 402 && said ? `${said} ${RESEARCH_INSTEAD}` : RESEARCH_MESSAGES.off);
     if (!said)
         return new XResearchError("unavailable", RESEARCH_MESSAGES.unavailable);
     const kind = status === 400 || status === 422 ? "bad_input" : status === 404 ? "not_found" : status === 402 ? "no_credit" : status === 409 ? "in_progress" : status === 429 ? "rate_limited" : "unavailable";
@@ -103,6 +108,72 @@ function relayError(status, body) {
     if (status === 429 && code === "quota_exceeded")
         return new XResearchError(kind, `${said} ${X_MESSAGES.addOwnKey}`);
     return new XResearchError(kind, near.length ? `${said} Did you mean ${near.join(", ")}?` : said);
+}
+/** The relay says research is off for this account: no paid plan (402), or research switched off (503 `service_unavailable`;
+ * a busy relay says `overloaded`). */
+function researchIsOff(status, body) {
+    return status === 402 || (status === 503 && isRow(body) && body.error === "service_unavailable");
+}
+/** Whether research works for `credential`, asked without spending anything. The person's own treg key goes straight to
+ * treg, so it does. The plan's relay refuses a search that names no job (400) only once it has checked the token, the
+ * account's plan and that research is on, before it reads the catalog; a 401, 404 or an off answer there means research
+ * is not on. Null when the relay could not be asked, or answered anything else. */
+export async function researchOffered(credential, options = {}) {
+    if (!credential.included)
+        return true;
+    let response;
+    try {
+        response = await (options.fetcher ?? fetch)(`${credential.api.replace(/\/+$/, "")}/research/search`, {
+            headers: { ...tregAuthHeaders(credential), accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(options.timeoutMs ?? 10_000),
+        });
+    }
+    catch {
+        return null;
+    }
+    const body = parsed(await readCapped(response).catch(() => ""));
+    if (response.status === 400)
+        return true;
+    return response.status === 401 || response.status === 404 || researchIsOff(response.status, body) ? false : null;
+}
+/** Research's availability for this server's credential, kept between turns so a conversation's tool list holds still:
+ * asked once, asked again an hour after it was off, and set off at once by a call the relay refuses as off. Until the
+ * relay has said, research counts as on: a bot then offered it and refused is told what to do. */
+export function createResearchAvailability(deps) {
+    const now = deps.now ?? Date.now;
+    const recheckOffMs = deps.recheckOffMs ?? 60 * 60_000;
+    let known = null;
+    let asking = null;
+    const keyOf = (credential) => createHash("sha256").update(`${credential.api}\0${credential.token}`).digest("hex");
+    const ask = (credential, key) => {
+        if (asking === key)
+            return;
+        asking = key;
+        void (deps.offered ?? researchOffered)(credential).then((on) => {
+            if (on !== null)
+                known = { key, on, at: now() };
+        }, () => { }).finally(() => {
+            if (asking === key)
+                asking = null;
+        });
+    };
+    return {
+        available() {
+            const credential = deps.credential();
+            if (!credential)
+                return false;
+            if (!credential.included)
+                return true;
+            const key = keyOf(credential);
+            if (known?.key !== key || (!known.on && now() - known.at >= recheckOffMs))
+                ask(credential, key);
+            return known?.key === key ? known.on : true;
+        },
+        refused() {
+            const credential = deps.credential();
+            if (credential?.included)
+                known = { key: keyOf(credential), on: false, at: now() };
+        },
+    };
 }
 /** The research client for a credential: treg's own API with the person's key (`included` false), else the plan's
  * relay. One retry, with the same Idempotency-Key, when a call's answer is lost on the way or treg says it is still

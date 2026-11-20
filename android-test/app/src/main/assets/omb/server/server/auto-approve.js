@@ -1,6 +1,7 @@
 // Nothing here decides whether an action is safe: each level is the provider's own permission mode passed through, and a
 // request reaching this process is one the provider left for a person. The app's own grants are Full access, the person's
-// exact saved commands and remembered MCP read tools, and Approve for me's web search. A bot's question always reaches a human.
+// exact saved commands and remembered MCP read tools, Approve for me's web search, and a bot's plain reads of its own files
+// at every level (own-file-reads.ts). A bot's question always reaches a human.
 import { supportsApprovalMode } from "../shared/approval-mode.js";
 import { failedTurnTool } from "../shared/failed-turn.js";
 import { isOutboundTool } from "../shared/outbound.js";
@@ -71,6 +72,8 @@ export function autoVerdict(mode, tool, context) {
         return { approve: `approved ${tool} (saved command)`, source: "command-allowlist" };
     if (context?.toolAllowed)
         return { approve: `approved ${tool} (always allowed)`, source: "tool-allowlist" };
+    if (context?.ownFilesRead)
+        return { approve: `approved ${tool} (its own files)`, source: "own-files" };
     if (mode === "auto" && WEB_SEARCH.has(bareToolName(tool))) {
         return { approve: `approved ${tool} (web search)`, source: "web-search" };
     }

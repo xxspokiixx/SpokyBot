@@ -29,6 +29,7 @@ export function createGroupRoutes(deps) {
     return async ({ req, res, path, method, auth, json, readBody }) => {
         let m = null;
         const visible = deps.visibleFor(auth);
+        const own = (group) => deps.groupFor?.(auth, group) ?? group;
         if (method === "POST" && path === "/api/groups") {
             const body = await readBody(req);
             const hiddenMember = Array.isArray(body?.memberIds) ? body.memberIds.find((id) => typeof id === "string" && store.bot(id) && !visible.bot(id)) : undefined;
@@ -38,7 +39,7 @@ export function createGroupRoutes(deps) {
             // On a Cloud home whoever opens a room names it (cloudThreadRefusal).
             if (CLOUD_HOME && auth.kind === "session")
                 threadStarters.set(group.threadId, actorKey(auth));
-            return json(res, 201, { group: { ...publicGroupState(group), messages: [] } });
+            return json(res, 201, { group: { ...own(publicGroupState(group)), messages: [] } });
         }
         m = path.match(/^\/api\/groups\/([\w-]+)\/setup$/);
         if (m && method === "PATCH") {
@@ -52,7 +53,7 @@ export function createGroupRoutes(deps) {
                 return json(res, 400, { error: "action must be complete or skip" });
             }
             if (group.setupCompletedAt != null || group.setupSkippedAt != null) {
-                return json(res, 200, { group: publicGroupState(group) });
+                return json(res, 200, { group: own(publicGroupState(group)) });
             }
             if (store.messagesFor(group.threadId).length > 0) {
                 return json(res, 409, { error: "room setup must be finished before the first message" });
@@ -80,7 +81,7 @@ export function createGroupRoutes(deps) {
             const updated = store.patchGroup(m[1], patch);
             if (!updated)
                 return json(res, 404, { error: "no such room" });
-            return json(res, 200, { group: publicGroupState(updated) });
+            return json(res, 200, { group: own(publicGroupState(updated)) });
         }
         return PASS;
     };

@@ -4,6 +4,8 @@
 // only when they can see every bot in it, and bots reach each other only with the same audience (sameAudience): a room
 // transcript or a delegation would otherwise carry a restricted bot's words to people who cannot see it.
 import { z } from "zod";
+import { accessFromVisibility, entryMatches, higherLevel, sharedLevel } from "../shared/bot-access.js";
+import { botOwner } from "../shared/bot-owner.js";
 import { audienceIncludes } from "./audience.js";
 export const SEES_EVERYTHING = { kind: "all" };
 export const MAX_VISIBILITY_PEOPLE = 500;
@@ -43,9 +45,6 @@ export function storedVisibility(value) {
 export function isRestricted(value) {
     return storedVisibility(value) !== "everyone";
 }
-function entryMatches(entry, email) {
-    return entry.startsWith("@") ? email.endsWith(entry) && email.length > entry.length : entry === email;
-}
 export function viewerSees(viewer, visibility) {
     if (viewer.kind === "all")
         return true;
@@ -56,6 +55,44 @@ export function viewerSees(viewer, visibility) {
         return false;
     const email = viewer.email?.trim().toLowerCase();
     return Boolean(email && email.includes("@") && stored.people.some((entry) => entryMatches(entry, email)));
+}
+const accessSchema = z.object({
+    everyone: z.enum(["none", "view", "chat", "edit"]),
+    people: z.record(z.string().max(320), z.enum(["view", "chat", "edit"])),
+}).strict();
+/** A bot's sharing as a request sends it: every entry an address or @domain, at most MAX_VISIBILITY_PEOPLE of them. */
+export function parseBotAccess(value) {
+    const parsed = accessSchema.safeParse(value);
+    if (!parsed.success)
+        return { ok: false, error: 'access must be { "everyone": "none" | "view" | "chat" | "edit", "people": { email: "view" | "chat" | "edit" } }' };
+    const people = {};
+    for (const [raw, level] of Object.entries(parsed.data.people)) {
+        const entry = raw.trim().toLowerCase();
+        if (!ENTRY.test(entry))
+            return { ok: false, error: `"${raw.slice(0, 80)}" is not an email address` };
+        people[entry] = level;
+    }
+    if (Object.keys(people).length > MAX_VISIBILITY_PEOPLE)
+        return { ok: false, error: `at most ${MAX_VISIBILITY_PEOPLE} people` };
+    return { ok: true, access: { everyone: parsed.data.everyone, people } };
+}
+/** The bot's sharing; one set before levels existed means what its visibility meant. A damaged stored value gives every
+ * member who sees the bot no more than viewing it. */
+export function accessOf(bot) {
+    if (bot.access === undefined)
+        return accessFromVisibility(storedVisibility(bot.visibility));
+    const parsed = parseBotAccess(bot.access);
+    return parsed.ok ? parsed.access : { everyone: "none", people: {} };
+}
+/** What a Team Cloud member may do with the bot. Seeing it is still its visibility's to decide, which an access change
+ * keeps in step; the owner can always edit; anyone who sees it can at least view it. */
+export function memberLevel(bot, email) {
+    const address = email?.trim().toLowerCase() ?? "";
+    if (!viewerSees({ kind: "member", email: address }, bot.visibility))
+        return "none";
+    if (address && botOwner(bot) === address)
+        return "edit";
+    return higherLevel(sharedLevel(accessOf(bot), address), "view");
 }
 export function sameAudience(a, b) {
     const left = storedVisibility(a);
@@ -129,6 +166,16 @@ export class VisibleSet {
     /** A non-admin session, even one that can see every bot: what only an admin reads still stays off its copy. */
     get member() {
         return this.viewer.kind === "member";
+    }
+    /** What this viewer may do with the bot: an admin edits every bot it sees; off a Team Cloud a member chats with every
+     * bot they see, as before levels; on one, the bot's sharing decides (memberLevel). */
+    level(id) {
+        if (!this.bot(id))
+            return "none";
+        if (this.viewer.kind === "all")
+            return "edit";
+        const bot = this.audiences ? this.bots.get(id) : undefined;
+        return bot ? memberLevel(bot, this.viewer.email) : "chat";
     }
     bot(id) {
         if (this.everything || this.viewer.kind === "all")
@@ -266,10 +313,15 @@ export function bodyThreadIds(body, depth = 1) {
     for (const [key, value] of Object.entries(body)) {
         if (typeof value === "string" && THREAD_FIELD.test(key))
             ids.push(value);
-        else if (key === "threadIds" && Array.isArray(value))
-            ids.push(...value.filter((id) => typeof id === "string"));
-        else if (depth > 0 && value && typeof value === "object")
-            ids.push(...bodyThreadIds(value, depth - 1));
+        else if (key === "threadIds" && Array.isArray(value)) {
+            for (const id of value)
+                if (typeof id === "string")
+                    ids.push(id);
+        }
+        else if (depth > 0 && value && typeof value === "object") {
+            for (const id of bodyThreadIds(value, depth - 1))
+                ids.push(id);
+        }
     }
     return ids;
 }
@@ -290,41 +342,63 @@ export function notFoundFor(subject) {
 export function memberBot(bot, visible) {
     if (visible.everything)
         return visible.member ? withoutServerAlias(bot) : bot;
-    const shown = visible.filtersThreads ? shownConversations(bot, visible) : bot;
+    const shown = visible.filtersThreads ? withLevel(shownConversations(bot, visible), visible) : bot;
     if (!visible.member)
         return shown;
     const { visibility: _visibility, vpsAlias: _vpsAlias, ...rest } = shown;
     const peers = Array.isArray(rest.peers) ? rest.peers.filter((id) => typeof id === "string" && visible.bot(id)) : undefined;
     return { ...rest, ...(peers ? { peers } : {}) };
 }
+/** On a Team Cloud each person's copy says what they may do with the bot; whoever can edit it also gets its sharing
+ * (an older bot's as its visibility meant it), and nobody else does. */
+function withLevel(bot, visible) {
+    const record = bot;
+    if (typeof record.id !== "string")
+        return bot;
+    const yourAccess = visible.level(record.id);
+    const { access: _access, ...rest } = record;
+    return (yourAccess === "edit" ? { ...rest, access: accessOf(record), yourAccess } : { ...rest, yourAccess });
+}
 /** What only the bot's selected conversation carries, dropped when that conversation is someone else's. */
 const SELECTED_THREAD_FIELDS = ["messages", "hasMore", "activeLeafId", "pinnedMessageId", "rewound", "waitingForTeammates"];
 /** On a Team Cloud a person is sent only their own conversations with a bot and the team's (an admin too). The bot's
- * selected conversation is the server's one choice for everyone; when it is someone else's private chat they get the
- * main chat named instead, without that conversation's messages, and its unread mark counts only what they see. */
+ * selected conversation and main chat are the server's one choice for everyone; when either is someone else's private
+ * chat they get a team conversation they read instead (the other's id never goes out), without that conversation's
+ * messages, and its unread mark counts only what they see. */
 function shownConversations(bot, visible) {
     const record = bot;
-    let out = null;
-    const tasks = record.tasks;
-    if (Array.isArray(tasks)) {
-        const kept = tasks.filter((task) => !task || typeof task !== "object" || typeof task.threadId !== "string" || visible.thread(task.threadId));
-        if (kept.length !== tasks.length) {
-            out = { ...record, tasks: kept };
-            if (typeof record.unread === "boolean")
-                out.unread = kept.some((task) => task?.unread === true);
-        }
+    let out = record;
+    const tasks = Array.isArray(record.tasks) ? record.tasks : [];
+    const kept = tasks.filter((task) => !task || typeof task !== "object" || typeof task.threadId !== "string" || visible.thread(task.threadId));
+    if (kept.length !== tasks.length) {
+        out = { ...record, tasks: kept };
+        if (typeof record.unread === "boolean")
+            out.unread = kept.some((task) => task?.unread === true);
+    }
+    const main = typeof record.mainThreadId === "string" && visible.thread(record.mainThreadId) ? record.mainThreadId : teamConversation(kept);
+    if (typeof record.mainThreadId === "string" && record.mainThreadId !== main) {
+        out = { ...out };
+        if (main)
+            out.mainThreadId = main;
+        else
+            delete out.mainThreadId;
     }
     if (typeof record.threadId === "string" && !visible.thread(record.threadId)) {
-        const next = { ...(out ?? record) };
+        const next = { ...out };
         for (const field of SELECTED_THREAD_FIELDS)
             delete next[field];
-        if (typeof record.mainThreadId === "string" && visible.thread(record.mainThreadId))
-            next.threadId = record.mainThreadId;
+        if (main)
+            next.threadId = main;
         else
             delete next.threadId;
         out = next;
     }
-    return (out ?? record);
+    return out;
+}
+function teamConversation(tasks) {
+    const shared = tasks.filter((task) => Boolean(task) && typeof task.threadId === "string" &&
+        task.private !== true && !task.routineRunId);
+    return (shared.find((task) => task.archivedAt === undefined) ?? shared[0])?.threadId;
 }
 /** The SSH alias of the server a bot's VPS computer lives on: an admin's, like the default alias in config. */
 export function withoutServerAlias(bot) {

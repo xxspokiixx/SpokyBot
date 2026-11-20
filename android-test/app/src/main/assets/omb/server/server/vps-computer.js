@@ -2,12 +2,14 @@
 import { createHash, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createConnection, createServer } from "node:net";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
+import { join, sep } from "node:path";
 import { BASE_IMAGE, CUA_DRIVER_VERSION, CUA_SOCKET, IMAGE as CUA_IMAGE, cuaExecArgs, dockerSecurityIsHardened, imageLabelsMatch, managedImageDockerfile, wholeScreenshot, BASE_IMAGE_DIGEST, BASE_IMAGE_LABEL, DRIVER_LABEL, IMAGE_LAYER_LABEL, IMAGE_LAYER_VERSION, MANAGED_LABEL, } from "./container-computer.js";
 import { PIDS_LIMIT, raisePidsLimit } from "./container-limits.js";
-import { DATA_DIR, isValidSshAlias, vpsSshAlias } from "./config.js";
+import { DATA_DIR, isValidSshUserHost, isValidVpsSshTarget, vpsSshAlias, vpsSshPort } from "./config.js";
 import { augmentedPath } from "./env-path.js";
 import { killCliTree, spawnCli } from "./procs.js";
-import { prepareVpsSsh } from "./vps-ssh.js";
+import { prepareVpsSsh, VPS_SSH_DIR } from "./vps-ssh.js";
 import { loadEnvironmentId } from "./environment.js";
 import { SPAWNED_PROXIES } from "./proxy-paths.js";
 export const VPS_IMAGE = CUA_IMAGE;
@@ -92,15 +94,223 @@ export function vpsContainerName(botId) {
     return `${VPS_CONTAINER_PREFIX}-${containerNamePart(botId)}-${hash}`;
 }
 export function vpsDockerArgs(alias, args) {
-    if (!isValidSshAlias(alias)) {
-        throw new Error("invalid VPS SSH config alias");
+    if (!isValidVpsSshTarget(alias)) {
+        throw new Error("invalid VPS SSH target (must be SSH config alias or user@host)");
     }
     return ["-H", `ssh://${alias}`, ...args];
 }
+/** ssh joins its remote argv with spaces and the far shell then parses that line again, so anything
+ *  with a space, a quote or a glob (the Cua scripts here carry all three) has to be escaped before
+ *  it is handed over, or the remote shell splits it. Tokens that are already safe stay as they are. */
+function remoteShellJoin(tokens) {
+    const safe = /^[A-Za-z0-9_@%+=:,./-]+$/;
+    return tokens.map((token) => (safe.test(token) ? token : shellQuote(token))).join(" ");
+}
+/**
+ * The phone shell ships no docker CLI, so `docker -H ssh://…` cannot start: `spawn docker` fails
+ * with EACCES. There the container is driven from the VPS side instead, through the rootfs's ssh
+ * client, which reaches the same daemon over the same target — alias or user@host alike.
+ */
+export function vpsRemoteDockerArgs(alias, args) {
+    if (process.platform !== "android")
+        return vpsDockerArgs(alias, args);
+    if (!isValidVpsSshTarget(alias)) {
+        throw new Error("invalid VPS SSH target (must be SSH config alias or user@host)");
+    }
+    const { configPath } = prepareVpsSsh(DATA_DIR, augmentedPath());
+    // ssh has no port syntax inside the target: it is a -p flag, and the target carries only
+    // the user and the host.
+    const port = isValidSshUserHost(alias) ? vpsSshPort(alias) : null;
+    const target = port === null ? alias : alias.slice(0, alias.lastIndexOf(":"));
+    return [
+        "ssh",
+        ...(configPath ? ["-F", configPath] : []),
+        ...vpsIdentityArgs(),
+        ...(port === null ? [] : ["-p", String(port)]),
+        target,
+        remoteShellJoin(["docker", ...args]),
+    ];
+}
+/** The staged keys, named so the guest's ssh does not have to find them itself. It reads
+ *  /root/.ssh inside the rootfs, which a fresh extract leaves empty, while the key files the app
+ *  copied from its assets live in the app's ssh directory — already bound into the guest at its
+ *  own path. Naming them keeps VPS auth working after every re-extraction. */
+export function vpsIdentityArgsFor(sshDir) {
+    return ["id_ed25519", "id_ecdsa", "id_rsa", "id_dsa"]
+        .filter((name) => existsSync(join(sshDir, name)))
+        .flatMap((name) => {
+        // The asset extractor restores only exec bits, so a private key lands world-readable and
+        // OpenSSH refuses it before it ever authenticates. These files are the app's own, copied
+        // from its assets, so tightening them is ours to do.
+        try {
+            chmodSync(join(sshDir, name), 0o600);
+        }
+        catch { /* a key the app does not own */ }
+        return ["-o", `IdentityFile=${posixPath(join(sshDir, name))}`];
+    });
+}
+function vpsIdentityArgs() {
+    return vpsIdentityArgsFor(join(DATA_DIR, VPS_SSH_DIR));
+}
+const VPS_SSH_CLIENT = "openssh-client libgssapi-krb5-2";
+/** The guest is Linux, so every path handed to it is a POSIX one whatever the host separator is. */
+function posixPath(value) {
+    return sep === "/" ? value : value.split(sep).join("/");
+}
+function shellQuote(value) {
+    return `'${value.replace(/'/g, "'\\''")}'`;
+}
+/** One apt run, then a marker file: the rootfs keeps the client between launches. GSSAPI rides
+ *  along because OpenSSH loads it on every connection attempt, not just at `ssh -V`. */
+async function ensureAndroidSshClient(linuxDir, rootfs) {
+    const { spawn } = await import("node:child_process");
+    const { join } = await import("node:path");
+    const { existsSync } = await import("node:fs");
+    // The client itself decides. The GSSAPI library can already be there (xfce and libcurl pull
+    // it) while ssh is absent, which used to pass the "any of these exists" test and left the
+    // guest without the binary: docker then answered "ssh: command not found".
+    const client = join(rootfs, "usr/bin/ssh");
+    const krb5 = join(rootfs, "usr/lib/aarch64-linux-gnu/libgssapi_krb5.so.2");
+    if (existsSync(client) && existsSync(krb5))
+        return;
+    await new Promise((resolve) => {
+        const child = spawn(join(linuxDir, "proot"), [
+            "-0", "-R", rootfs,
+            "-b", `${rootfs}/etc/passwd:/etc/passwd`,
+            "-b", `${rootfs}/etc/group:/etc/group`,
+            "-b", `${rootfs}/etc/shadow:/etc/shadow`,
+            "-b", `${linuxDir}:/host-linux`,
+            "-w", "/root", "/bin/bash", "-lc",
+            // apt-get update first: a freshly extracted rootfs carries no package lists, so the
+            // install would fail with "Unable to locate package" and the client would stay missing.
+            `export DEBIAN_FRONTEND=noninteractive TMPDIR=/tmp; apt-get update -qq; apt-get install -y --no-install-recommends ${VPS_SSH_CLIENT}`,
+        ], {
+            env: {
+                PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                HOME: "/root",
+                TMPDIR: join(linuxDir, "tmp"),
+                LD_LIBRARY_PATH: linuxDir,
+                PROOT_TMP_DIR: join(linuxDir, "tmp"),
+                PROOT_NO_SECCOMP: "1",
+                PROOT_ASSUME_MEMFD_UNSUPPORTED: "1",
+                PROOT_LOADER: join(linuxDir, "loader"),
+            },
+            stdio: "ignore",
+        });
+        child.on("error", () => resolve());
+        child.on("close", () => resolve());
+    });
+}
+function sshClientArgv(args) {
+    const rest = args[0] === "ssh" ? args.slice(1) : [...args];
+    return rest[0] === "-F" && rest.length > 1 ? rest.slice(2) : rest;
+}
+/**
+ * The one place that starts the VPS ssh client. Android denies exec of a binary the app writes
+ * into its own data directory and ships no client on PATH, so there the rootfs's ssh runs inside
+ * proot; everywhere else the app's shim supplies the shared config. Exported because the MCP
+ * bridge starts the same client to reach the bot's container.
+ */
+export async function vpsSshLaunch(args) {
+    const sshArgs = sshClientArgv(args);
+    if (process.platform !== "android") {
+        const ssh = prepareVpsSsh(DATA_DIR, augmentedPath());
+        return {
+            command: "ssh",
+            args: ssh.configPath ? ["-F", ssh.configPath, ...sshArgs] : sshArgs,
+            env: { ...process.env, PATH: ssh.path },
+        };
+    }
+    const linuxDir = process.env.OMB_ANDROID_LINUX_DIR;
+    const rootfs = process.env.OMB_ANDROID_ROOTFS;
+    if (!linuxDir || !rootfs)
+        throw Object.assign(new Error("the Android Linux environment is not configured"), { status: 409 });
+    const sshDir = join(DATA_DIR, VPS_SSH_DIR);
+    mkdirSync(sshDir, { recursive: true, mode: 0o700 });
+    // Written here so the guest sees it even when the host PATH carries no ssh to shim.
+    prepareVpsSsh(DATA_DIR, augmentedPath());
+    await ensureAndroidSshClient(linuxDir, rootfs);
+    const prootPath = join(linuxDir, "proot");
+    if (!existsSync(prootPath))
+        throw Object.assign(new Error("the Android Linux environment has no proot"), { status: 409 });
+    const configured = sshArgs[0] === "-F" ? sshArgs : ["-F", `${posixPath(sshDir)}/config`, ...sshArgs];
+    // proot shadows /etc/passwd with an empty placeholder, so every getpwuid() fails and OpenSSH
+    // aborts with "No user exists for uid 0" before it opens a socket. Bind the rootfs's own NSS
+    // files back in and name resolution works. The app's ssh dir rides its host path, so the
+    // generated config and every IdentityFile in it stay addressable inside the guest.
+    return {
+        command: prootPath,
+        args: [
+            "-R", rootfs,
+            "-0",
+            "-b", `${rootfs}/etc/passwd:/etc/passwd`,
+            "-b", `${rootfs}/etc/group:/etc/group`,
+            "-b", `${rootfs}/etc/shadow:/etc/shadow`,
+            "-b", `${sshDir}:/${sshDir.replace(/^\//, "")}`,
+            "-b", `${linuxDir}:/host-linux`,
+            "-b", `${join(linuxDir, "tmp")}:/tmp`,
+            "-w", "/root", "/bin/bash", "-lc",
+            `export PATH="/usr/bin:/bin:$PATH"; exec ${["ssh", ...configured].map(shellQuote).join(" ")}`,
+        ],
+        env: {
+            PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            HOME: "/root",
+            TMPDIR: join(linuxDir, "tmp"),
+            LD_LIBRARY_PATH: linuxDir,
+            PROOT_TMP_DIR: join(linuxDir, "tmp"),
+            PROOT_NO_SECCOMP: "1",
+            PROOT_ASSUME_MEMFD_UNSUPPORTED: "1",
+            PROOT_LOADER: join(linuxDir, "loader"),
+            DEBIAN_FRONTEND: "noninteractive",
+        },
+    };
+}
+async function androidSshRunner(args, options) {
+    const launch = await vpsSshLaunch(args);
+    const child = spawn(launch.command, launch.args, {
+        env: launch.env,
+        stdio: ["pipe", "pipe", "pipe"],
+    });
+    return new Promise((resolve, reject) => {
+        const stdout = [];
+        const stderr = [];
+        let settled = false;
+        let timeout;
+        const settle = (finish) => {
+            if (settled)
+                return;
+            settled = true;
+            clearTimeout(timeout);
+            finish();
+        };
+        const fail = (error) => {
+            if (settled)
+                return;
+            clearTimeout(timeout);
+            void killCliTree(child, COMMAND_TIMEOUT_TERM_GRACE_MS).then(() => settle(() => reject(error)));
+        };
+        timeout = setTimeout(() => fail(new Error("Docker-over-SSH command timed out")), options.timeoutMs ?? 120_000);
+        timeout.unref?.();
+        child.stdout.setEncoding("utf8");
+        child.stderr.setEncoding("utf8");
+        child.stdout.on("data", (chunk) => stdout.push(chunk));
+        child.stderr.on("data", (chunk) => stderr.push(chunk));
+        child.on("error", (error) => fail(new Error(`Docker-over-SSH could not start: ${error.message}`)));
+        child.on("close", (code) => settle(() => {
+            if (code === 0)
+                return resolve({ stdout: stdout.join(""), stderr: stderr.join("") });
+            reject(new Error(stderr.join("").trim().slice(-1000) || `Docker-over-SSH exited ${code ?? "without a status"}`));
+        }));
+        try {
+            child.stdin.end(options.input);
+        }
+        catch { }
+    });
+}
 /** Never published by Docker: SSH forwards one loopback port to noVNC, and every caller-controlled part is validated before argv. */
 export function vpsSshTunnelArgs(alias, localPort, privateIp, configPath = null) {
-    if (!isValidSshAlias(alias))
-        throw new Error("invalid VPS SSH config alias");
+    if (!isValidVpsSshTarget(alias))
+        throw new Error("invalid VPS SSH target (must be SSH config alias or user@host)");
     if (!Number.isInteger(localPort) || localPort < 1024 || localPort > 65535) {
         throw new Error("invalid VPS viewer port");
     }
@@ -233,6 +443,8 @@ function tailCollector() {
     };
 }
 export function defaultRunner(args, options = {}) {
+    if (process.platform === "android")
+        return androidSshRunner(args, options);
     return new Promise((resolve, reject) => {
         // Docker's SSH transport runs the first `ssh` on PATH: the app's shim, which shares one connection.
         const ssh = prepareVpsSsh(DATA_DIR, augmentedPath());
@@ -400,7 +612,7 @@ async function computeVpsComputerStatus(cfg, botId, runner) {
     if (!alias)
         return status;
     viewerConnections.delete(`${alias}:${status.container_name}`);
-    const run = (args, timeoutMs = 10_000, input) => runner(vpsDockerArgs(alias, args), { timeoutMs, input });
+    const run = (args, timeoutMs = 10_000, input) => runner(vpsRemoteDockerArgs(alias, args), { timeoutMs, input });
     // Retry only read-only inspections, never an exec or mutation whose outcome a lost connection hides.
     const inspect = async (args) => {
         try {
@@ -586,7 +798,7 @@ function managedVpsState(value, running) {
 }
 async function scanManagedVpsAlias(alias, owners, runner) {
     try {
-        const listed = await runner(vpsDockerArgs(alias, [
+        const listed = await runner(vpsRemoteDockerArgs(alias, [
             "container",
             "ls",
             "--all",
@@ -602,7 +814,7 @@ async function scanManagedVpsAlias(alias, owners, runner) {
         if (ids.length === 0) {
             return { available: true, problem: null, instances: [], containerIds: new Map() };
         }
-        const inspected = await runner(vpsDockerArgs(alias, ["container", "inspect", ...ids]), { timeoutMs: 20_000 });
+        const inspected = await runner(vpsRemoteDockerArgs(alias, ["container", "inspect", ...ids]), { timeoutMs: 20_000 });
         const details = JSON.parse(inspected.stdout);
         if (!Array.isArray(details) || details.length !== ids.length) {
             throw new Error("the VPS returned an incomplete managed-container inventory");
@@ -661,7 +873,7 @@ async function scanManagedVpsAlias(alias, owners, runner) {
 }
 export async function listManagedVpsComputers(cfg, owners, runner = defaultRunner, vpsAliases) {
     const defaultAlias = vpsSshAlias(snapshotVpsConfig(cfg));
-    const scanning = [...new Set((vpsAliases?.length ? vpsAliases : defaultAlias ? [defaultAlias] : []).filter(isValidSshAlias))];
+    const scanning = [...new Set((vpsAliases?.length ? vpsAliases : defaultAlias ? [defaultAlias] : []).filter(isValidVpsSshTarget))];
     if (scanning.length === 0) {
         return { configured: false, available: false, vpsAliases: [], problem: null, instances: [] };
     }
@@ -743,8 +955,8 @@ function assertUsableContainer(status) {
     }
 }
 async function prepareVpsImage(alias, runner) {
-    await runner(vpsDockerArgs(alias, ["pull", BASE_IMAGE]), { timeoutMs: 10 * 60_000 });
-    await runner(vpsDockerArgs(alias, ["build", "-t", VPS_IMAGE, "-"]), {
+    await runner(vpsRemoteDockerArgs(alias, ["pull", BASE_IMAGE]), { timeoutMs: 10 * 60_000 });
+    await runner(vpsRemoteDockerArgs(alias, ["build", "-t", VPS_IMAGE, "-"]), {
         input: managedImageDockerfile(),
         timeoutMs: 10 * 60_000,
     });
@@ -787,7 +999,7 @@ async function waitForVpsReady(cfg, botId, runner, budgetMs = 60_000) {
         });
         delayMs = Math.min(delayMs * 2, 4_000);
         const container = status.container_id ?? status.container_name;
-        const driverAnswers = await boundedRunner(vpsDockerArgs(alias, cuaExecArgs(["status", "--socket", CUA_SOCKET], { container })), { timeoutMs: 10_000 }).then(() => true, () => false);
+        const driverAnswers = await boundedRunner(vpsRemoteDockerArgs(alias, cuaExecArgs(["status", "--socket", CUA_SOCKET], { container })), { timeoutMs: 10_000 }).then(() => true, () => false);
         if (budgetExpired)
             break;
         if (!driverAnswers && Date.now() < deadline)
@@ -876,7 +1088,7 @@ export async function removeManagedVpsComputer(cfg, owners, containerName, confi
         }
         try {
             // The immutable ID, not the name: a same-name replacement must not receive this removal.
-            await runner(vpsDockerArgs(alias, ["rm", "-f", containerId]), { timeoutMs: 2 * 60_000 });
+            await runner(vpsRemoteDockerArgs(alias, ["rm", "-f", containerId]), { timeoutMs: 2 * 60_000 });
         }
         catch (error) {
             invalidateVpsStatus(key);
@@ -912,7 +1124,7 @@ export async function vpsComputerAction(action, cfg, botId, runner = defaultRunn
                 return before;
             if (action !== "provision" || before.container !== "running")
                 stopDesktopTunnel(botId);
-            const run = (args, timeoutMs = 2 * 60_000) => runner(vpsDockerArgs(alias, args), { timeoutMs });
+            const run = (args, timeoutMs = 2 * 60_000) => runner(vpsRemoteDockerArgs(alias, args), { timeoutMs });
             const containerRef = before.container_id ?? before.container_name;
             if (action === "provision") {
                 if (before.container === "missing") {
@@ -1026,10 +1238,10 @@ export async function vpsComputerJoin(cfg, botId, runner = defaultRunner, remote
         throw Object.assign(new Error("This VPS computer predates secure live desktop access — replace its managed container once"), { status: 409 });
     }
     const localPort = await unusedLoopbackPort();
-    const ssh = prepareVpsSsh(DATA_DIR, augmentedPath());
-    const child = spawn("ssh", vpsSshTunnelArgs(alias, localPort, connection.privateIp, ssh.configPath), {
+    const launch = await vpsSshLaunch(vpsSshTunnelArgs(alias, localPort, connection.privateIp));
+    const child = spawn(launch.command, launch.args, {
         shell: false,
-        env: { ...process.env, PATH: ssh.path },
+        env: launch.env,
         stdio: ["ignore", "ignore", "pipe"],
         windowsHide: true,
     });
@@ -1069,8 +1281,25 @@ export async function vpsComputerJoin(cfg, botId, runner = defaultRunner, remote
     desktopTunnels.set(botId, { child, joinUrl, expiry, viewers: 0, localViewer: !remoteViewer });
     return { joinUrl, state: "running" };
 }
+/** The bot drives its VPS container through Cua's MCP server, which the app reaches with the same
+ *  client the rest of this module uses: docker locally, or the guest's ssh where there is none.
+ *  `liveness` probes the transport, not the driver, so a desktop mid-tool-call never looks dead. */
+export async function vpsContainerMcpLaunch(alias, containerName) {
+    if (!isValidVpsSshTarget(alias) || (!CONTAINER_NAME.test(containerName) && !CONTAINER_ID.test(containerName))) {
+        throw new Error("invalid VPS MCP connection");
+    }
+    const mcp = cuaExecArgs(["mcp", "--socket", CUA_SOCKET], { container: containerName, interactive: true });
+    const version = ["version", "--format", "{{.Server.Version}}"];
+    if (process.platform !== "android") {
+        const ssh = prepareVpsSsh(DATA_DIR, augmentedPath());
+        const env = { ...process.env, PATH: ssh.path };
+        return { command: "docker", args: vpsDockerArgs(alias, mcp), env, liveness: { command: "docker", args: vpsDockerArgs(alias, version) } };
+    }
+    const launch = await vpsSshLaunch(vpsRemoteDockerArgs(alias, mcp));
+    return { ...launch, liveness: { command: launch.command, args: (await vpsSshLaunch(vpsRemoteDockerArgs(alias, version))).args } };
+}
 export function vpsContainerMcpArgs(alias, containerName) {
-    if (!isValidSshAlias(alias) || (!CONTAINER_NAME.test(containerName) && !CONTAINER_ID.test(containerName))) {
+    if (!isValidVpsSshTarget(alias) || (!CONTAINER_NAME.test(containerName) && !CONTAINER_ID.test(containerName))) {
         throw new Error("invalid VPS MCP connection");
     }
     return vpsDockerArgs(alias, cuaExecArgs(["mcp", "--socket", CUA_SOCKET], { container: containerName, interactive: true }));
@@ -1156,8 +1385,8 @@ export async function vpsComputerScreenshot(cfg, botId, runner = defaultRunner) 
         }
         let frame;
         try {
-            await boundedRunner(vpsDockerArgs(alias, cuaExecArgs(["call", "get_desktop_state", "{}", "--socket", CUA_SOCKET, "--screenshot-out-file", SCREENSHOT_PATH], { container: containerRef })), { timeoutMs: 30_000 });
-            const encoded = (await boundedRunner(vpsDockerArgs(alias, [
+            await boundedRunner(vpsRemoteDockerArgs(alias, cuaExecArgs(["call", "get_desktop_state", "{}", "--socket", CUA_SOCKET, "--screenshot-out-file", SCREENSHOT_PATH], { container: containerRef })), { timeoutMs: 30_000 });
+            const encoded = (await boundedRunner(vpsRemoteDockerArgs(alias, [
                 "exec",
                 "-u",
                 "cua",
@@ -1183,7 +1412,7 @@ export async function vpsComputerScreenshot(cfg, botId, runner = defaultRunner) 
         finally {
             const cleanupMs = Math.min(5_000, deadline - Date.now() - COMMAND_TIMEOUT_KILL_GRACE_MS);
             if (cleanupMs > 0)
-                await runner(vpsDockerArgs(alias, ["exec", "-u", "cua", containerRef, "rm", "-f", SCREENSHOT_PATH]), {
+                await runner(vpsRemoteDockerArgs(alias, ["exec", "-u", "cua", containerRef, "rm", "-f", SCREENSHOT_PATH]), {
                     timeoutMs: cleanupMs,
                 }).catch(() => { });
         }

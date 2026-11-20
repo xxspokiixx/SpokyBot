@@ -4,6 +4,8 @@ import { createReadStream } from "node:fs";
 import { cloudHomeConfigured } from "../cloud-home.js";
 import { DATA_DIR } from "../config.js";
 import { SyncError, createCloudSync } from "../cloud-sync.js";
+import { createLentCopies } from "../lent-copies.js";
+import { createLentClones } from "../lent-clone.js";
 import { answerAsleep, cloudPowerNow } from "../cloud-power.js";
 import { PASS } from "./table.js";
 const FOLDER = String.raw `([\w-]{1,200})`;
@@ -12,6 +14,10 @@ export function createCloudSyncRoutes(options) {
     let sync = null;
     let folderFilter = () => () => true;
     const service = () => sync ??= createCloudSync({ dataDir: options.dataDir, root: options.root, statfs: options.statfs });
+    const lent = options.lent ?? createLentCopies({ dataDir: options.dataDir });
+    // Built on first use too: its restart sweep writes to the data folder, which the server owns only once it started.
+    let cloneService = options.clones ?? null;
+    const clones = () => cloneService ??= createLentClones({ dataDir: options.dataDir, changed: (syncId) => sync?.noteChange(syncId) });
     const handler = async ({ req, res, url, path, method, auth, json, readBody }) => {
         if (path !== "/api/sync" && !path.startsWith("/api/sync/"))
             return PASS;
@@ -35,7 +41,41 @@ export function createCloudSyncRoutes(options) {
         try {
             if (method === "GET" && path === "/api/sync") {
                 const summary = s.summary();
-                json(res, 200, { ...summary, folders: summary.folders.filter((entry) => shown(entry.id)) });
+                lent.sweep();
+                // `staged`: changes bots made to a lent folder while its computer was away, waiting for it.
+                // `lentCopies`: this Cloud keeps lent folders' copies out of bots' reach and answers for them while their computer
+                // is away; a desktop copies lent folders only to a Cloud that says so.
+                json(res, 200, { ...summary, lentCopies: true, folders: summary.folders.filter((entry) => shown(entry.id)).map((entry) => entry.kind === "pc" ? { ...entry, staged: lent.stagedCount(entry.id), ...(clones().cloning(entry.id) ? { cloning: true } : {}) } : entry) });
+                return;
+            }
+            if (method === "POST" && path === "/api/sync/lent") {
+                lent.report(await readBody(req, 100_000));
+                json(res, 200, { ok: true });
+                return;
+            }
+            if (method === "POST" && (m = match(`/api/sync/folders/${FOLDER}/synced`))) {
+                if (s.store.folder(m[1])?.kind !== "pc") {
+                    json(res, 404, { error: "no such synced folder" });
+                    return;
+                }
+                lent.synced(m[1]);
+                json(res, 200, { ok: true });
+                return;
+            }
+            if (method === "GET" && (m = match(`/api/sync/folders/${FOLDER}/staged`))) {
+                json(res, 200, { staged: lent.staged(m[1]) });
+                return;
+            }
+            if (method === "POST" && (m = match(`/api/sync/folders/${FOLDER}/staged/${UPLOAD}`))) {
+                lent.stagedDone(m[1], m[2], await readBody(req, 10_000));
+                json(res, 200, { ok: true });
+                return;
+            }
+            if (method === "GET" && (m = match(`/api/sync/folders/${FOLDER}/staged/${UPLOAD}`))) {
+                const file = lent.stagedFile(m[1], m[2]);
+                res.writeHead(200, { "content-type": "application/octet-stream", "content-length": String(file.size), "x-omb-sha256": file.sha256,
+                    "x-content-type-options": "nosniff", "content-disposition": "attachment", "content-security-policy": "sandbox" });
+                createReadStream(file.file).on("error", () => res.destroy()).pipe(res);
                 return;
             }
             if (method === "GET" && path === "/api/sync/changes") {
@@ -63,11 +103,15 @@ export function createCloudSyncRoutes(options) {
                 return;
             }
             if (method === "POST" && path === "/api/sync/folders") {
-                json(res, 200, { folder: s.register(await readBody(req, 100_000)) });
+                const body = await readBody(req, 100_000);
+                const folder = s.register(body);
+                // A new copy of a lent GitHub repository starts as a clone; the desktop leaves it alone while it is `cloning`.
+                const cloning = folder.lent === true && clones().start(folder.id, folder.cloudPath, body?.git);
+                json(res, 200, { folder: { ...folder, ...(cloning ? { cloning: true } : {}) } });
                 return;
             }
             if (method === "DELETE" && (m = match(`/api/sync/folders/${FOLDER}`))) {
-                s.unregister(m[1], url.searchParams.get("keepCloudCopy") !== "0");
+                await s.unregister(m[1], url.searchParams.get("keepCloudCopy") !== "0");
                 res.writeHead(204).end();
                 return;
             }
@@ -123,7 +167,9 @@ export function createCloudSyncRoutes(options) {
     };
     // Before the desktop's first call there is nobody to tell: its first pass reads every folder.
     return Object.assign(handler, { close: () => { sync?.close(); sync = null; }, noteBotTurn: (botId, threadId) => sync?.noteBotTurn(botId, threadId),
-        showFolders: (next) => { folderFilter = next; } });
+        showFolders: (next) => { folderFilter = next; }, lent, idle: () => cloneService?.idle() ?? Promise.resolve() });
 }
-export const cloudSyncRoutes = createCloudSyncRoutes({ dataDir: DATA_DIR, cloudHome: () => cloudHomeConfigured(), power: cloudPowerNow });
+/** Lent folders' copies, for the sync routes and for bots' shared_computer while a lending computer is away. */
+export const lentCopies = createLentCopies({ dataDir: DATA_DIR });
+export const cloudSyncRoutes = createCloudSyncRoutes({ dataDir: DATA_DIR, cloudHome: () => cloudHomeConfigured(), power: cloudPowerNow, lent: lentCopies });
 export const noteSyncBotTurn = (botId, threadId) => cloudSyncRoutes.noteBotTurn(botId, threadId);

@@ -254,4 +254,27 @@ describe("Lazy phone claim on the real server", () => {
       expect(retried.result.content[0].text).toContain("available");
     });
   });
+
+  it("refuses a bot's call while a person holds the phone, and lets it through once they hand it back", async () => {
+    rmSync(finishFile, { force: true });
+    const bot = await makeBot("Phone owner present");
+    const spec = await holdDirectTurn(bot.id, "read what is on my phone");
+    const claim = (body: unknown) => fetch(base + "/api/internal/phone/claim", {
+      method: "POST", headers: { authorization: `Bearer ${spec.env.OMB_PHONE_TOKEN}`, "content-type": "application/json" }, body: JSON.stringify(body),
+    });
+    try {
+      // Taken from the app's own route, as a person would.
+      expect(await api("PUT", "/api/phone-hold", { held: true })).toMatchObject({ held: true });
+      const refused = await claim({ wait: false });
+      expect(refused.status).toBe(423);
+      // `wait` asks for the hand-back: the call the proxy makes is held until the person lets go.
+      const waiting = claim({ wait: true });
+      await new Promise((done) => setTimeout(done, 100));
+      await api("PUT", "/api/phone-hold", { held: false });
+      expect(await (await waiting).json()).toMatchObject({ claimed: true, waited: true });
+      await busy(bot.id);
+    } finally {
+      await api("PUT", "/api/phone-hold", { held: false }).catch(() => {});
+    }
+  });
 });

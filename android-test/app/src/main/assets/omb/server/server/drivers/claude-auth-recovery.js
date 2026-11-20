@@ -59,7 +59,7 @@ export function claudeAuthRecovery(publish, retire, busy) {
             if (refusal?.kind === "auth" && event.type === "runtime.error" && event.setup && event.message === refusal.text)
                 return void held.buffered.push(event);
             if (refusal?.kind === "limit" && event.type === "runtime.error" && !event.setup) {
-                Object.assign(refusal, { said: event.message, resetsAt: event.limitResetsAt });
+                Object.assign(refusal, { said: event.message, resetsAt: event.limitResetsAt, scope: event.limit });
                 return void held.buffered.push(event);
             }
             if (refusal && held.refused && event.type === "turn.completed" && !event.ok && event.stopReason === refusedStop[refusal.kind] && typeof event.turnId === "string") {
@@ -72,7 +72,7 @@ export function claudeAuthRecovery(publish, retire, busy) {
                         return accept(event.threadId, held);
                     pending.delete(event.threadId);
                     held.settle(refusal.kind === "auth" ? new TurnAuthenticationRefusedError(turnId, refusal.text)
-                        : new TurnUsageLimitRefusedError(turnId, refusal.said ?? refusal.text, refusal.resetsAt));
+                        : new TurnUsageLimitRefusedError(turnId, refusal.said ?? refusal.text, refusal.resetsAt, refusal.scope));
                 }, () => accept(event.threadId, held));
             }
             accept(event.threadId, held);

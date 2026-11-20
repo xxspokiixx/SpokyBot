@@ -236,7 +236,9 @@ export async function fillLogin(input, deps) {
     const pageHost = fillable.pageHost;
     const all = await input.candidates(pageHost);
     if (!all.length) {
-        return { ok: false, host: pageHost, text: `No saved login for ${pageHost}. A login fills on its own site and the sign-in hosts saved with it, never on another site. ${listed(await input.available())} Open that site's login page, or call request_sign_in so the person signs in.` };
+        const trouble = input.trouble?.();
+        const missing = trouble ? ` 1Password could not be read just now, so its logins may be missing: ${trouble}` : "";
+        return { ok: false, host: pageHost, text: `No saved login for ${pageHost}. A login fills on its own site and the sign-in hosts saved with it, never on another site. ${listed(await input.available())}${missing} Open that site's login page, or call request_sign_in so the person signs in.` };
     }
     let chosen = all;
     const wanted = input.username?.trim();

@@ -102,7 +102,7 @@ export { cloudHomeOffersPlace } from "../shared/cloud-home.js";
 /** In the person's words; a turn's error shows 160 characters, so each fits. */
 export function cloudHomePlaceRefusal(place) {
     if (place === "local")
-        return "This computer isn't a place in the Cloud. Set Works on to Auto, Cloud desktop or Browser, or share your computer under Settings → SpokyBot Cloud.";
+        return "This computer isn't a place in the Cloud. Set Works on to Auto, Cloud desktop or Browser; your own computer is reached while SpokyBot is open on it.";
     if (place === "vm")
         return "Cloud bots can't use a private desktop. Set Works on to Auto, Cloud desktop or Browser.";
     return undefined;
@@ -195,6 +195,8 @@ export function createCloudPairing(options) {
                 return { status: 400, body: { error: "invalid_owner" } };
             }
             const ttl = Math.min(ttlSeconds ?? CLOUD_PAIRING_DEFAULT_TTL_S, browser ? CLOUD_BROWSER_SIGN_IN_MAX_TTL_S : CLOUD_PAIRING_MAX_TTL_S);
+            if (member)
+                sessions.revokeMember(member.email, member.role);
             const opened = sessions.openPairing({
                 scopes: member ? teamRoleScopes(member.role) : ["admin", "client"],
                 label: typeof label === "string" && label.trim() ? label.trim() : "SpokyBot Cloud",

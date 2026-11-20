@@ -49,7 +49,9 @@ export function threadActionTarget(action) {
     return undefined;
 }
 export const isThreadAction = (action) => threadActionTarget(action) !== undefined;
-const CLIENT_ACTION = (action) => action.type === "open_url" || action.type === "open_thread";
+/** `open_phone_pairing` opens the app's own phone pairing (the QR code and link) on the device. */
+export const PHONE_PAIRING_ACTION = "open_phone_pairing";
+const CLIENT_ACTION = (action) => action.type === "open_url" || action.type === "open_thread" || action.type === PHONE_PAIRING_ACTION;
 const ROOT_TYPES = new Set(["Card", "ListView"]);
 const FIELD_TYPES = new Set(["Select", "DatePicker", "TimePicker", "DayPicker", "Checkbox", "RadioGroup", "Input", "Textarea"]);
 const TYPE_ALIASES = { TableRow: "Table.Row", TableCell: "Table.Cell" };
@@ -828,28 +830,28 @@ export function resolveWidgetAction(payload, ref, values, other) {
     return done(clean, own, lines);
 }
 /** A word to the bot about a widget that parses but does not do what it
- * looks like it is for: rows to choose between and no way to choose, or a
- * time, date or days the person is asked to type. Undefined when there is
- * nothing to say. */
+ * looks like it is for: rows to choose between and no way to choose, or one
+ * time, date or set of days typed in a one-line field (a Textarea may list
+ * several). Undefined when there is nothing to say. */
 export function widgetAdvice(root) {
     const notes = [];
     const rows = Array.isArray(root.children) ? root.children.length : 0;
     if (root.type === "ListView" && rows >= 2 && buttonSpecOf(root, "confirm") && widgetFields(root).length === 0
         && !widgetActions(root).some((entry) => entry.kind === "item" || entry.kind === "button")) {
-        notes.push("No row of this list can be chosen: the person can only confirm or cancel it as a whole. If they are meant to pick one row, call update_widget and give the ListView a name (and each row a value), so the rows become selectable and confirm sends the pick.");
+        notes.push("No row of this list can be chosen: the person can only confirm or cancel it as a whole. If they are meant to pick one row, show it again with its widget_id and give the ListView a name (and each row a value), so the rows become selectable and confirm sends the pick.");
     }
     const fields = widgetFields(root);
     const sending = widgetActions(root).filter((entry) => !entry.client && entry.tone !== "cancel");
     if (fields.length > 0 && !sending.length) {
-        notes.push("Nothing in this widget sends what the person fills in. Call update_widget with confirm: {label, action} (and cancel if they may decline) so they can send it.");
+        notes.push("Nothing in this widget sends what the person fills in. Show it again with its widget_id and confirm: {label, action} (and cancel if they may decline) so they can send it.");
     }
     else if (fields.length > 0) {
         const sent = new Set(sending.flatMap((entry) => widgetFields(widgetScope(root, entry.ref), root).map((field) => field.name)));
         const unsent = fields.filter((field) => !sent.has(field.name)).map((field) => JSON.stringify(field.label));
         if (unsent.length)
-            notes.push(`${unsent.join(", ")} sits outside the Form whose button is the only way to send, so it is never sent. Call update_widget with it inside that Form, or with confirm on the Card.`);
+            notes.push(`${unsent.join(", ")} sits outside the Form whose button is the only way to send, so it is never sent. Show it again with its widget_id, with it inside that Form or with confirm on the Card.`);
     }
-    const typed = fields.filter((field) => field.type === "Input" || field.type === "Textarea");
+    const typed = fields.filter((field) => field.type === "Input");
     // "each time", "every time" and "how many times" are not a time of day
     const phrase = (field) => `${field.name} ${field.label} ${widgetString(field.node, "placeholder") ?? ""}`
         .replace(/\b(each|every|this|next|first|last|any|some|one|other|same|spare|free|full|part|lead|over|down)[\s-]+times?\b/gi, " ")
@@ -865,7 +867,7 @@ export function widgetAdvice(root) {
         const labels = asks(pattern).filter((label) => !seen.has(label));
         labels.forEach((label) => seen.add(label));
         if (labels.length)
-            notes.push(`${labels.map((label) => JSON.stringify(label)).join(", ")} asks the person to type what a ${picker} lets them pick. Call update_widget with a ${picker} in its place.`);
+            notes.push(`${labels.map((label) => JSON.stringify(label)).join(", ")} asks the person to type what a ${picker} lets them pick. Show it again with its widget_id and a ${picker} in its place.`);
     }
     return notes.length ? notes.join(" ") : undefined;
 }

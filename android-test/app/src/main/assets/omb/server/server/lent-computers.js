@@ -3,12 +3,11 @@
 // last used, and whether its owner stopped lending. Never a folder path, a credential or anything a job carried.
 import { existsSync, readFileSync } from "node:fs";
 import { z } from "zod";
-import { useMyComputerLink } from "../shared/use-my-computer.js";
 import { writeFileAtomic } from "./atomic.js";
 export const LENT_PLATFORMS = ["darwin", "win32", "linux"];
 const recordSchema = z.object({
     id: z.string().uuid(), person: z.string().min(1).max(200), name: z.string().min(1).max(120), platform: z.enum(LENT_PLATFORMS).nullable(),
-    folders: z.number().int().min(0).max(20), terminal: z.boolean(), screen: z.boolean(), internet: z.boolean().optional(),
+    folders: z.number().int().min(0).max(20), terminal: z.boolean(), screen: z.boolean(), internet: z.boolean().optional(), chrome: z.boolean().optional(),
     lastSeenAt: z.number(), lastUsedAt: z.number().nullable(), stoppedAt: z.number().nullable(),
 }).strict();
 const fileSchema = z.object({ version: z.literal(1), computers: z.array(recordSchema).max(200) });
@@ -56,7 +55,7 @@ export class LentComputers {
         const same = (computer) => computer.person === person && (computer.id === input.id || computer.name === input.name);
         const previous = this.computers.find(same);
         const next = { id: input.id, person, name: input.name, platform: input.platform ?? previous?.platform ?? null, folders: input.folders,
-            terminal: input.terminal, screen: input.screen, internet: input.internet === true, lastSeenAt: at, lastUsedAt: previous?.lastUsedAt ?? null, stoppedAt: null };
+            terminal: input.terminal, screen: input.screen, internet: input.internet === true, chrome: input.chrome === true, lastSeenAt: at, lastUsedAt: previous?.lastUsedAt ?? null, stoppedAt: null };
         const others = this.computers.filter((computer) => !same(computer));
         const mine = [next, ...others.filter((computer) => computer.person === person)].slice(0, PER_PERSON);
         this.computers = [...mine, ...others.filter((computer) => computer.person !== person)];
@@ -97,23 +96,25 @@ export class LentComputers {
         return this.computers.filter((computer) => computer.person === person).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
     }
 }
-/** How the person lends apps and screen: one link, pressed in SpokyBot on the lent computer, which asks them once. */
-export const lendScreenSteps = (device) => `To lend them, give the person ${useMyComputerLink(device)} to press in SpokyBot `
-    + `on that ${device}: it asks them once and turns on its apps and screen.`;
+/** What makes a lent computer lend its apps and screen: SpokyBot on it lends them by itself once computer control works there. */
+export const lendScreenSteps = (device) => device === "Mac"
+    ? "SpokyBot on that Mac lends them by itself once macOS allows it Accessibility and Screen Recording: tell the person in one sentence to allow both for SpokyBot in System Settings → Privacy & Security on that Mac, and to update SpokyBot there if it is an older version."
+    : `SpokyBot on that ${device} lends them by itself once its computer control works: tell the person in one sentence to check computer control in SpokyBot on that ${device}, and to update SpokyBot there if it is an older version.`;
 const dateText = (at) => new Date(at).toISOString().slice(0, 16).replace("T", " ") + " UTC";
 /**
  * What list_shared_computers adds for a bot when a computer it knows is not online: the computer by name and kind, since
  * when, and the one sentence to say. Nothing when every known computer is online.
  */
-export function awayNotice(known, online) {
+export function awayNotice(known, online, askTool = null) {
     const away = known.filter((computer) => !online.has(computer.id));
     if (!away.length || known.some((computer) => online.has(computer.id)))
         return {};
     const offline = away.slice(0, 3).map((computer) => ({ name: computer.name, device: deviceWord(computer.platform), lastOnline: dateText(computer.lastSeenAt), lent: computer.stoppedAt === null }));
     const latest = away[0];
     const device = deviceWord(latest.platform);
+    const ask = askTool ? ` If the request needs it, call ${askTool}: it asks them with a one-tap Turn on, and you carry on once it's on. Don't explain the fix in chat.` : null;
     const say = latest.stoppedAt === null
-        ? `Their ${device} ${latest.name} is shared with the Cloud but offline (last online ${dateText(latest.lastSeenAt)}): SpokyBot on it is closed, or the ${device} is asleep or off. Ask them to open SpokyBot on that ${device}; it reconnects by itself.`
-        : `Their ${device} ${latest.name} is no longer shared with the Cloud: sharing was turned off on it. To share it again, they press ${useMyComputerLink(device)} in SpokyBot on that ${device}.`;
+        ? `Their ${device} ${latest.name} is shared with the Cloud but offline (last online ${dateText(latest.lastSeenAt)}): SpokyBot on it is closed, or the ${device} is asleep or off.${ask ?? ` Ask them to open SpokyBot on that ${device}; it reconnects by itself.`}`
+        : `Their ${device} ${latest.name} no longer shares itself with the Cloud: SpokyBot on it is paused, or signed out of SpokyBot Cloud.${ask ?? ` Ask them to choose Resume from SpokyBot's icon in the ${device === "Mac" ? "menu bar" : "taskbar"} on that ${device}, or sign in there again.`}`;
     return { offline, say };
 }

@@ -25,15 +25,18 @@ export function normalizeSignInSite(raw) {
     return { url: url.href, site: url.hostname.replace(/^www\./, "") };
 }
 /** A still-open sign-in card for this site — the set a newer request
- * supersedes. Done, cancelled and already-superseded cards keep their
- * settled state. In a room only the asking bot's own cards count. */
+ * supersedes. Done, cancelled, already-superseded and answered-in-chat
+ * cards keep their settled state. In a room only the asking bot's own
+ * cards count. */
 export function isPendingSignInRequest(message, site, requestingBotId, roomThread) {
     return (message.kind === "signin" &&
         message.signIn?.site === site &&
-        message.signIn.done !== true &&
-        message.signIn.cancelled !== true &&
-        message.signIn.superseded !== true &&
+        signInWaits(message.signIn) &&
         (!roomThread || message.from?.botId === requestingBotId));
+}
+/** Whether the card still waits on the person: not done, cancelled, superseded or answered in the chat. */
+export function signInWaits(card) {
+    return card.done !== true && card.cancelled !== true && card.superseded !== true && card.answeredInChat !== true;
 }
 /** How a card ended, or null while it is open. */
 export function signInOutcome(state) {
@@ -49,9 +52,4 @@ export function signInResumePrompt(site, outcome) {
     return outcome === "done"
         ? `SpokyBot sign-in update: the person finished signing in to ${site}. Check you are signed in, then continue the task that paused for it. Never ask them for a password or a one-time code in chat.`
         : `SpokyBot sign-in update: the person declined to sign in to ${site}. Continue without it if you can, or briefly explain what you could not do. Never ask them for a password or a one-time code in chat.`;
-}
-/** The transcript line under the card, and all a client that does not know
- * the card draws. */
-export function signInFallbackText(botName, site) {
-    return `${botName} needs you to sign in to ${site}. Open this conversation in SpokyBot to sign in, then press Done.`;
 }

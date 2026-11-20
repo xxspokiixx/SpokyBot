@@ -60,6 +60,11 @@ function resolve(role, name, columns) {
     return { column, cls: columnClass(column.type), id: quoteIdentifier(column.name) };
 }
 const vegaType = (c) => (c.cls === "numeric" ? "quantitative" : c.cls === "temporal" ? "temporal" : "nominal");
+/** Dates as people write them ("Sep 8", "Oct", "2026"), never Vega's default weekday labels ("Tue 15"). */
+const TIME_AXIS = {
+    formatType: "time",
+    format: { year: "%Y", quarter: "%b", month: "%b", week: "%b %-d", date: "%b %-d", hours: "%-I %p", minutes: "%-I:%M %p", seconds: "%-I:%M:%S", milliseconds: "%-I:%M:%S.%L" },
+};
 function categorical(x, channel, spec) {
     const sort = spec.sort === "-x" ? "descending" : spec.sort === "y" || spec.sort === "-y" ? spec.sort : undefined;
     return {
@@ -69,13 +74,19 @@ function categorical(x, channel, spec) {
         reduction: { method: "group", note: `grouped by ${x.column.name}` },
     };
 }
+const INTEGER_TYPE = /^U?(TINYINT|SMALLINT|INTEGER|INT\d*|BIGINT|HUGEINT)$/;
+/** Whole numbers bin by whole steps, so a column like week 36…44 draws one bar per value, not 30 slivers. */
 function binned(x, channel, bins, bars) {
     const v = `CAST(${x.id} AS DOUBLE)`;
+    const whole = INTEGER_TYPE.test(x.column.type.trim().toUpperCase());
+    const width = whole
+        ? `greatest(1, ceil((max(${v}) - min(${v}) + 1) / ${bins}))`
+        : `CASE WHEN max(${v}) = min(${v}) THEN 1 ELSE (max(${v}) - min(${v})) / ${bins} END`;
     const cte = {
         name: `bins_${channel}`,
         body: `
   SELECT min(${v}) AS lo,
-         CASE WHEN max(${v}) = min(${v}) THEN 1 ELSE (max(${v}) - min(${v})) / ${bins} END AS width
+         ${width} AS width
   FROM src
 `,
     };
@@ -87,7 +98,7 @@ function binned(x, channel, bins, bars) {
             expr: start,
             end: { channel: end, expr: `${cte.name}.lo + (${bin} + 1) * ${cte.name}.width` },
             cte,
-            encoding: { field: channel, type: "quantitative", title: x.column.name, bin: "binned" },
+            encoding: { field: channel, type: "quantitative", title: x.column.name, bin: "binned", ...(whole ? { axis: { format: "d" } } : {}) },
             endEncoding: { field: end },
             tooltip: [
                 { field: channel, type: "quantitative", title: `${x.column.name} from`, format: ".4~g" },
@@ -113,23 +124,30 @@ function timeBucketed(x, channel, spec, bars) {
     else {
         cte = { name: `span_${channel}`, body: "" };
         unit = `${cte.name}.unit`;
-        const seconds = `epoch(max(CAST(${x.id} AS TIMESTAMP)) - min(CAST(${x.id} AS TIMESTAMP)))`;
+        // The smallest unit that keeps under the target count and is at least the data's own step: weekly rows get week
+        // buckets, never seven one-day slivers. `next` is the shortest length of the following unit.
         const steps = [
-            ["INTERVAL 1 HOUR", 3600],
-            ["INTERVAL 1 DAY", 86400],
-            ["INTERVAL 1 WEEK", 604800],
-            ["INTERVAL 1 MONTH", 2629800],
-            ["INTERVAL 3 MONTH", 7889400],
+            { interval: "INTERVAL 1 HOUR", seconds: 3600, next: 86400 },
+            { interval: "INTERVAL 1 DAY", seconds: 86400, next: 7 * 86400 },
+            { interval: "INTERVAL 1 WEEK", seconds: 604800, next: 28 * 86400 },
+            { interval: "INTERVAL 1 MONTH", seconds: 2629800, next: 89 * 86400 },
+            { interval: "INTERVAL 3 MONTH", seconds: 7889400, next: 365 * 86400 },
         ];
         const whens = steps
-            .filter(([interval]) => !(isDate && interval === "INTERVAL 1 HOUR"))
-            .map(([interval, s]) => `    WHEN ${seconds} <= ${TIME_BUCKETS_TARGET * s} THEN ${interval}`)
+            .filter(({ interval }) => !(isDate && interval === "INTERVAL 1 HOUR"))
+            .map(({ interval, seconds, next }) => `    WHEN span <= ${TIME_BUCKETS_TARGET * seconds} AND step < ${next} THEN ${interval}`)
             .join("\n");
         cte.body = `
   SELECT CASE
 ${whens}
     ELSE INTERVAL 1 YEAR END AS unit
-  FROM src
+  FROM (
+    SELECT epoch(max(v) - min(v)) AS span, coalesce(min(gap), 0) AS step
+    FROM (
+      SELECT v, epoch(v - lag(v) OVER (ORDER BY v)) AS gap
+      FROM (SELECT DISTINCT CAST(${x.id} AS TIMESTAMP) AS v FROM src WHERE ${x.id} IS NOT NULL)
+    )
+  )
 `;
     }
     const bucket = `time_bucket(${unit}, ${x.id})`;
@@ -139,7 +157,7 @@ ${whens}
         expr: bucket,
         ...(bars ? { end: { channel: end, expr: `${bucket} + ${unit}` }, endEncoding: { field: end } } : {}),
         cte,
-        encoding: { field: channel, type: "temporal", title: x.column.name },
+        encoding: { field: channel, type: "temporal", title: x.column.name, axis: TIME_AXIS },
         tooltip: [{ field: channel, type: "temporal", title: x.column.name }],
         reduction: { method: "timeBucket", note: `${x.column.name} bucketed ${unitNote}` },
     };
@@ -175,12 +193,14 @@ function colorEncoding(color) {
     return { field: "color", type: vegaType(color), title: color.column.name };
 }
 function vegaLiteSpec(mark, encoding, tooltip) {
+    // Vega-Lite reads a bar with x and x2 but no binned x as a horizontal range at each y, which draws a stack as ticks.
+    const ranged = mark === "bar" && encoding.x2 !== undefined;
     return {
         $schema: "https://vega.github.io/schema/vega-lite/v6.json",
         width: "container",
         height: 280,
         data: { name: "table" },
-        mark: { type: mark },
+        mark: ranged ? { type: mark, orient: "vertical" } : { type: mark },
         encoding: { ...encoding, tooltip },
     };
 }
@@ -292,7 +312,7 @@ function planM4(x, y, color, mark) {
         .join("\n     OR ");
     const body = `SELECT x, y${color ? ", color" : ""}\nFROM px\nQUALIFY ${windows}\nORDER BY ${color ? "color, x" : "x"}`;
     const encoding = {
-        x: { field: "x", type: "temporal", title: x.column.name },
+        x: { field: "x", type: "temporal", title: x.column.name, axis: TIME_AXIS },
         y: { field: "y", type: "quantitative", title: y.column.name, ...(mark === "area" ? { stack: null } : {}) },
     };
     const tooltip = [

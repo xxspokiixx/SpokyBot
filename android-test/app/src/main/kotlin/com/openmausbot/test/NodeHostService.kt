@@ -131,10 +131,11 @@ class NodeHostService : Service() {
             Log.d(TAG, "runBoot: ensuring server config")
             ensureServerConfig(node.absolutePath)
             Log.d(TAG, "runBoot: ensuring local computer")
+            // The rootfs is only the phone's "this computer". A phone whose storage is full, or whose SELinux policy
+            // refuses the links the archive holds, still runs every bot; it loses that one destination, and says why.
             ensureLocalComputer(node.absolutePath)?.let { failure ->
-                NodeState.update(NodeState.Phase.Failed, detail = failure)
-                postNotification(getString(R.string.notif_failed), withStop = false, withResume = true)
-                return
+                Log.w(TAG, "local computer unavailable: $failure")
+                NodeState.status.update { it.copy(detail = "this computer is unavailable: $failure") }
             }
             Log.d(TAG, "runBoot: starting node")
             startNode(node.absolutePath)
@@ -252,6 +253,81 @@ class NodeHostService : Service() {
         }
     }
 
+    /**
+     * The desktop stack is launched detached, so nothing owns it: when the payload is replaced it
+     * survives with deleted binaries and still answers on the X display and the viewer ports.
+     * An app cannot enumerate other processes, but /proc is readable and every guest command
+     * names the rootfs, so the stack is found by its own argv and stopped.
+     */
+    private fun stopRunningGuest() {
+        val marker = File(filesDir, LINUX_DIR).absolutePath
+        val self = android.os.Process.myPid()
+        val killed = mutableListOf<Int>()
+        // Bounded: a /proc entry that cannot be read (SELinux denies another uid's cmdline, or the process left between
+        // the listing and the read) must cost nothing, and the whole sweep is over in a second on a phone.
+        val deadline = System.currentTimeMillis() + 5_000
+        for (entry in File("/proc").listFiles() ?: return) {
+            if (System.currentTimeMillis() > deadline) break
+            val pid = entry.name.toIntOrNull() ?: continue
+            if (pid == self) continue
+            val cmdline = runCatching {
+                // A byte array, not a stream: readText on a foreign cmdline can block on Android, and this runs at boot.
+                java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(entry.path, "cmdline")).toString(Charsets.UTF_8).replace('\u0000', ' ')
+            }.getOrNull() ?: continue
+            if (!cmdline.contains(marker)) continue
+            if (runCatching { android.os.Process.sendSignal(pid, android.os.Process.SIGNAL_KILL) }.isSuccess) {
+                killed.add(pid)
+            }
+        }
+        if (killed.isNotEmpty()) {
+            val waitUntil = System.currentTimeMillis() + 3_000
+            while (System.currentTimeMillis() < waitUntil && killed.any { File("/proc/$it").exists() }) {
+                runCatching { Thread.sleep(100) }
+            }
+        }
+        // The X server holds its display lock in a file the extraction is about to remove; without
+        // clearing it the next Xvfb refuses to start on :3.
+        val linux = File(filesDir, LINUX_DIR)
+        runCatching { File(linux, "rootfs/tmp/.X3-lock").delete() }
+        runCatching { File(linux, "tmp/.X3-lock").delete() }
+        runCatching { File(linux, "tmp/.X11-unix/X3").delete() }
+    }
+
+    /**
+     * Empties a folder before it is staged again. SELinux denies `unlink` on some staged asset names, and a
+     * `Files.walkFileTree` that meets one keeps visiting the same directory until the app is killed: this deletes what
+     * it can, then lets `/system/bin/rm` do the rest, and never blocks past the cap. Best effort by design: the staging
+     * that follows re-extracts everything, and a file left behind is overwritten.
+     *
+     * A folder an earlier extraction left as root is one this uid cannot empty. That is reported and stepped over: the
+     * extraction writes a new `rootfs-staging` beside it and renames it into place, which needs no delete. Nothing here
+     * asks a root shell for help — `su` waits for a person to approve it, and nothing may wait on that during a boot.
+     */
+    private fun wipeDirectory(dir: File) {
+        if (!dir.exists()) return
+        runCatching {
+            val deadline = System.currentTimeMillis() + 60_000
+            dir.listFiles()?.forEach { entry ->
+                if (System.currentTimeMillis() > deadline) return@forEach
+                runCatching { entry.deleteRecursively() }
+            }
+        }
+        if (!dir.exists()) return
+        runCatching {
+            val proc = ProcessBuilder("/system/bin/rm", "-rf", dir.absolutePath).redirectErrorStream(true).start()
+            // The pipe is drained on its own thread: a full buffer would otherwise wedge rm with the app waiting on it.
+            val drain = Thread { runCatching { proc.inputStream.bufferedReader().forEachLine { } } }
+            drain.isDaemon = true
+            drain.start()
+            if (!proc.waitFor(3, java.util.concurrent.TimeUnit.MINUTES)) proc.destroyForcibly()
+            drain.join(2_000)
+        }
+        if (dir.exists()) {
+            Log.w(TAG, "wipeDirectory: ${dir.absolutePath} could not be emptied (not this app's files); carrying on beside it")
+            NodeState.update(detail = "keeping past files in ${dir.name}")
+        }
+    }
+
     /** Stages the phone's "this computer" (see android-test/linux/): a proot'ed
      * Alpine rootfs plus the MCP server the harness gate launches for a bot that
      * picks "this computer" as its working destination. Returns an error only for a
@@ -262,21 +338,44 @@ class NodeHostService : Service() {
         val mcp = File(linux, "android-local-computer.mjs")
         try {
             val version = assets.open("$OMB_ASSET_DIR/VERSION").bufferedReader().use { it.readText().trim() }
+            // Only the linux part of the build names this payload: `omb-test-<app>-server<sha>-ui<sha>-linux<sha>`. A new
+            // server or UI bundle leaves the rootfs exactly as it is, and re-extracting 471 MB on a phone for a change
+            // that did not touch it costs minutes of the person's time.
+            val linuxVersion = version.substringAfterLast("-linux", "").let { if (it.isEmpty()) version else "linux$it" }
             val stamp = File(linux, "STAMP")
             val stampText = runCatching { stamp.readText().trim() }.getOrDefault("")
-            if (!mcp.exists() || stampText != version) {
-                linux.deleteRecursively()
+            // A stamp written by an older build holds the whole version: its linux part is read out of it.
+            val stampLinux = if (stampText.contains("-linux")) stampText.substringAfterLast("-linux", "").let { "linux$it" } else stampText
+            if (!mcp.exists() || stampLinux != linuxVersion) {
+                stopRunningGuest()
+                // Attempts that were killed mid-extraction leave their own whole copies of the rootfs here. They are
+                // this app's own leftovers, and the extraction that follows needs the room.
+                linux.listFiles()?.filter { it.name.startsWith("rootfs-old-") }?.forEach { wipeDirectory(it) }
+                wipeDirectory(linux)
                 linux.mkdirs()
                 copyAssetDir(assets, "$OMB_ASSET_DIR/linux", linux)
                 val rootfs = File(linux, "rootfs")
-                rootfs.mkdirs()
+                wipeDirectory(rootfs)
+                val rootfsStaging = File(linux, "rootfs-staging")
+                wipeDirectory(rootfsStaging)
+                rootfsStaging.mkdirs()
                 // aapt decompresses *.gz assets, so the tarball ships as rootfs.blob —
                 // still a gzip stream either way; plain tars arrive from older builds.
                 val tarball = File(linux, "rootfs.blob").takeIf { it.exists() }
                     ?: File(linux, "rootfs.tar.gz").takeIf { it.exists() }
                     ?: File(linux, "rootfs.tar")
                 val tarFlags = if (tarball.name == "rootfs.blob" || tarball.name.endsWith(".gz")) listOf("-xzf") else listOf("-xf")
-                val tar = ProcessBuilder(listOf("/system/bin/tar") + tarFlags + listOf(tarball.absolutePath, "-C", rootfs.absolutePath))
+                // The archive's /dev holds device nodes (ptmx, console, random, …) whose creation
+                // needs CAP_MKNOD — a capability neither the app nor ADB/Shizuku's shell user has on
+                // Android, so extracting them fails with EPERM. proot -R bind-mounts the host /dev
+                // into the guest, making the archive's nodes redundant; skip them and recreate the
+                // empty mountpoint below.
+                val exclude = File(linux, "tar-exclude.txt").apply { writeText("./dev/*\n") }
+                // `--no-same-owner`: the archive's ids mean nothing to an app's uid, and chown is refused outright.
+                // Hardlinks in the archive cannot be made either (SELinux denies `link` on newer Android), so tar is
+                // told to keep going past them: a file that loses its hardlink is still extracted whole, which is all
+                // the guest needs, and the exit code alone is not what says whether the tree arrived.
+                val tar = ProcessBuilder(listOf("/system/bin/tar", "-C", rootfsStaging.absolutePath, "-X", exclude.absolutePath, "--no-same-owner") + tarFlags + listOf(tarball.absolutePath))
                     .redirectErrorStream(true)
                     .start()
                 val tarOutput = StringBuffer()
@@ -292,16 +391,38 @@ class NodeHostService : Service() {
                     return "linux environment extraction timed out after 15 minutes: ${tarOutput.toString().takeLast(300)}"
                 }
                 drain.join(5_000)
-                if (tar.exitValue() != 0) {
+                // What says the tree arrived is the tree, not tar's exit code: a hardlink it was refused is reported as
+                // an error while the file itself is written whole, and a phone does not need the link.
+                val stagingRoot = File(rootfsStaging, "usr")
+                val stagingBin = File(rootfsStaging, "bin")
+                if (!stagingRoot.isDirectory && !stagingBin.isDirectory) {
                     return "linux environment extraction failed: ${tarOutput.toString().takeLast(300)}"
                 }
+                if (tar.exitValue() != 0) {
+                    Log.w(TAG, "tar exited ${tar.exitValue()} but the tree is there: ${tarOutput.toString().takeLast(300)}")
+                }
+                if (rootfs.exists()) {
+                    val stale = File(linux, "rootfs-old-${System.currentTimeMillis()}")
+                    if (!rootfs.renameTo(stale)) {
+                        return "linux environment extraction failed: could not clear previous rootfs"
+                    }
+                    // Cleared right here, not later: a folder left behind is one more copy of the rootfs on a phone, and
+                    // the next extraction has to fit beside it.
+                    wipeDirectory(stale)
+                }
+                if (!rootfsStaging.renameTo(rootfs)) {
+                    return "linux environment extraction failed: could not move staging rootfs into place"
+                }
                 tarball.delete()
+                // --exclude skips the archive's /dev directory too; proot -R needs an empty guest
+                // mountpoint to bind the host /dev onto.
+                File(rootfs, "dev").mkdirs()
                 // copyAssetDir streams bytes only: every exec-able file in the
                 // payload needs its mode restored, or execve answers EACCES.
                 File(linux, "proot").setExecutable(true, false)
                 File(linux, "loader").setExecutable(true, false)
                 File(linux, "omb-guest-chromium").setExecutable(true, false)
-                stamp.writeText(version)
+                stamp.writeText(linuxVersion)
             }
             val workspace = File(filesDir, WORKSPACE_DIR).apply { mkdirs() }
             val dataDir = File(filesDir, DATA_DIR_NAME).apply { mkdirs() }
@@ -637,21 +758,26 @@ class NodeHostService : Service() {
         // any phone-lane consumer derives the proot chain from it, and proot
         // itself needs its bionic companions on the loader path wherever the
         // server spawns it.
-        put("OMB_ANDROID_LINUX_DIR", File(filesDir, LINUX_DIR).absolutePath)
-put("OMB_ANDROID_DATA_DIR", File(filesDir, DATA_DIR_NAME).absolutePath)
-put("OMB_EXTRA_PATH", File(File(filesDir, LINUX_DIR), "bin").absolutePath)
-        put("LD_LIBRARY_PATH", File(filesDir, LINUX_DIR).absolutePath)
+        val linuxDir = File(filesDir, LINUX_DIR)
+        val rootfs = File(linuxDir, "rootfs")
+        val workspace = File(filesDir, WORKSPACE_DIR)
+        put("OMB_ANDROID_LINUX_DIR", linuxDir.absolutePath)
+        put("OMB_ANDROID_ROOTFS", rootfs.absolutePath)
+        put("OMB_ANDROID_WORKSPACE", workspace.absolutePath)
+        put("OMB_ANDROID_DATA_DIR", File(filesDir, DATA_DIR_NAME).absolutePath)
+        put("OMB_EXTRA_PATH", File(linuxDir, "bin").absolutePath)
+        put("LD_LIBRARY_PATH", linuxDir.absolutePath)
         // The proot chains the server itself spawns (the OpenCode engine) need
         // the same loader contract the MCP scripts set explicitly.
-        put("PROOT_TMP_DIR", File(File(filesDir, LINUX_DIR), "tmp").absolutePath)
+        put("PROOT_TMP_DIR", File(linuxDir, "tmp").absolutePath)
         put("PROOT_NO_SECCOMP", "1")
         put("PROOT_ASSUME_MEMFD_UNSUPPORTED", "1")
-        put("PROOT_LOADER", File(File(filesDir, LINUX_DIR), "loader").absolutePath)
+        put("PROOT_LOADER", File(linuxDir, "loader").absolutePath)
         openCodeApiKey?.let { put("OPENCODE_API_KEY", it) }
         // The phone's browser: the guest's chromium, reached through the
         // omb-guest-chromium wrapper, and Chrome's own sandbox off (the guest
         // runs under proot, without user namespaces).
-        put("OMB_CHROME_PATH", File(File(filesDir, LINUX_DIR), "omb-guest-chromium").absolutePath)
+        put("OMB_CHROME_PATH", File(linuxDir, "omb-guest-chromium").absolutePath)
         put("OMB_BROWSER_SANDBOX", "0")
         // Android standalone: trust local WebView without pairing
         put("OMB_ANDROID_STANDALONE", "1")
@@ -683,16 +809,26 @@ put("OMB_EXTRA_PATH", File(File(filesDir, LINUX_DIR), "bin").absolutePath)
         Log.d(TAG, "tailProcess: process hash=${process.hashCode()} exited with code=$exit")
         if (stopping) return
         val phase = NodeState.status.value.phase
+        // The server asks for a fresh start with exit 70 after an error it could not survive (server/restart.ts); a kill
+        // by the system (the low-memory killer on this phone) arrives as 137 or a signal. Both are a crash, and the
+        // launcher starts it again after a pause — that is the whole point of the server's crash guard.
+        val crashed = exit == CRASH_EXIT_CODE || exit in KILLED_CODES
         when {
             phase == NodeState.Phase.Failed || phase == NodeState.Phase.Stopped || phase == NodeState.Phase.Idle -> return
-            phase == NodeState.Phase.Ready -> {
+            phase == NodeState.Phase.Ready && !crashed -> {
                 NodeState.update(NodeState.Phase.Stopped, detail = "node exited (code $exit)")
                 postNotification(getString(R.string.notif_stopped), withStop = false, withResume = true)
             }
             restarts < MAX_RESTARTS -> {
                 restarts++
-                NodeState.status.update { it.copy(detail = "node exited (code $exit); restarting") }
-                scope.launch { runBoot() }
+                // A crash waits longer each time (the same ladder the CLI and container launchers use), so a loop slows
+                // down instead of burning the phone's battery in a tight start-fail cycle.
+                val delay = RESTART_BACKOFF_MS[(restarts - 1).coerceAtMost(RESTART_BACKOFF_MS.lastIndex)]
+                NodeState.status.update { it.copy(detail = "node exited (code $exit); restarting in ${delay / 1000} s") }
+                scope.launch {
+                    kotlinx.coroutines.delay(delay)
+                    if (!stopping) runBoot()
+                }
             }
             else -> {
                 NodeState.update(
@@ -998,6 +1134,11 @@ put("OMB_EXTRA_PATH", File(File(filesDir, LINUX_DIR), "bin").absolutePath)
         private const val LOG_CAP_BYTES = 5_000_000L
         private const val LOG_TAIL_CHARS = 2048
         private const val MAX_RESTARTS = 3
+        /** Mirrors CRASH_BACKOFF_MS in server/restart.ts: a crash in a row waits longer each time. */
+        private val RESTART_BACKOFF_MS = longArrayOf(1_000, 2_000, 5_000)
+        /** Mirrors CRASH_EXIT_CODE and the shell's 128 + signal: a server that asked for this, or that the system killed. */
+        private const val CRASH_EXIT_CODE = 70
+        private val KILLED_CODES = setOf(134, 137, 139)
         private const val TAG = "NodeHostService"
     }
 }

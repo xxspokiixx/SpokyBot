@@ -1,5 +1,5 @@
-// A conversation whose engine hit its usage limit continues on the configured backup, and goes back to its own engine
-// once that limit has reset.
+// A conversation whose engine hit its usage limit, or was signed out, continues on the configured backup, and goes back to
+// its own engine once that limit has reset or it is signed in again.
 import { readFileSync } from "node:fs";
 import { sameModelSelection } from "../shared/thread-model.js";
 import { writeFileAtomic } from "./atomic.js";
@@ -16,7 +16,12 @@ export function limitBackupAllowed(from, to, toConfig) {
         return false;
     if (to.driverKind !== from.driverKind || !SUBSCRIPTION_DRIVERS.has(from.driverKind))
         return true;
-    return toConfig?.access === "api" || PAY_PER_USE_KEYS.some((key) => Boolean(toConfig?.environment?.[key]?.trim()));
+    return billsEachUse(toConfig);
+}
+/** An engine instance that bills each use (a pay-per-use key, as its access or in its environment) instead of drawing on
+ * a plan's limit. */
+export function billsEachUse(config) {
+    return config?.access === "api" || PAY_PER_USE_KEYS.some((key) => Boolean(config?.environment?.[key]?.trim()));
 }
 export function resetClock(at, timeZone = hostTimeZone()) {
     try {
@@ -31,8 +36,13 @@ export function resetClock(at, timeZone = hostTimeZone()) {
 export function failoverLine(from, to, resetsAt) {
     return `${from} hit its limit${resetsAt ? ` (resets ${resetClock(resetsAt)})` : ""}, so ${to} took over.`;
 }
-export function backLine(engine) {
-    return `${engine}'s limit has reset, so this conversation is back on ${engine}.`;
+export function backLine(engine, why) {
+    return why === "signed-out" ? `${engine} is signed in again, so this conversation is back on ${engine}.`
+        : `${engine}'s limit has reset, so this conversation is back on ${engine}.`;
+}
+/** "Claude is signed out, so Codex took over." */
+export function signedOutLine(from, to) {
+    return `${from} is signed out, so ${to} took over.`;
 }
 /** With no reset time known, a conversation tries its own engine again no sooner than this. */
 const UNKNOWN_RESET_WAIT_MS = 60 * 60_000;
@@ -41,7 +51,7 @@ function load(file) {
         const rows = JSON.parse(readFileSync(file, "utf8"));
         return Array.isArray(rows) ? rows.filter((row) => typeof row?.botId === "string" && typeof row?.threadId === "string" &&
             typeof row?.from?.instanceId === "string" && typeof row?.to?.instanceId === "string" && (row.resetsAt === null || Number.isFinite(row.resetsAt)) &&
-            Number.isFinite(row.at)) : [];
+            Number.isFinite(row.at) && (row.why === undefined || row.why === "signed-out")) : [];
     }
     catch {
         return [];
@@ -54,16 +64,18 @@ export class LimitFailovers {
         this.deps = deps;
         this.rows = load(deps.file);
     }
-    /** A thread moved to `to` because `from`'s usage limit refused it. */
+    /** A thread moved to `to` because `from`'s usage limit refused it, or `from` was signed out. */
     record(failover) {
         const earlier = this.rows.find((row) => row.threadId === failover.threadId);
         // A second failover keeps the engine the conversation started on, so it still goes back there.
         const from = earlier && sameModelSelection(earlier.to, failover.from) ? earlier.from : failover.from;
-        this.rows = [...this.rows.filter((row) => row.threadId !== failover.threadId), { ...failover, from }].slice(-500);
+        // A reset already past when the limit refused names no time: the engine's own hold decides when it goes back.
+        const resetsAt = failover.resetsAt !== null && failover.resetsAt > failover.at ? failover.resetsAt : null;
+        this.rows = [...this.rows.filter((row) => row.threadId !== failover.threadId), { ...failover, from, resetsAt }].slice(-500);
         this.save();
     }
-    /** Before a turn: a thread on a backup goes back to its own engine once that engine's limit has reset, with one line
-     * saying so. A thread someone moved to another model since is left alone. */
+    /** Before a turn: a thread on a backup goes back to its own engine once that engine's limit has reset, or it is
+     * signed in again, with one line saying so. A thread someone moved to another model since is left alone. */
     restore(botId, threadId) {
         const row = this.rows.find((candidate) => candidate.threadId === threadId && candidate.botId === botId);
         if (!row)
@@ -72,13 +84,15 @@ export class LimitFailovers {
         const current = this.deps.threadModel(botId, threadId);
         if (!current || !sameModelSelection(current, row.to))
             return this.forget(threadId);
-        const waitUntil = row.resetsAt ?? row.at + UNKNOWN_RESET_WAIT_MS;
+        const waitUntil = row.why === "signed-out" ? row.at : row.resetsAt ?? row.at + UNKNOWN_RESET_WAIT_MS;
         if (waitUntil > now || this.deps.blockedUntil(row.from.instanceId) !== null)
+            return false;
+        if (row.why === "signed-out" && this.deps.signedOut?.(row.from.instanceId))
             return false;
         if (!this.deps.switchBack(row))
             return false;
         this.forget(threadId);
-        this.deps.note(threadId, backLine(this.deps.engineName(row.from.instanceId)));
+        this.deps.note(threadId, backLine(this.deps.engineName(row.from.instanceId), row.why));
         return true;
     }
     forget(threadId) {

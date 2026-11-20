@@ -46,6 +46,7 @@ function restore(target, saved) {
     Object.assign(target, saved);
 }
 const PERMISSION_FIELDS = ["approvalMode", "autoApprove", "alwaysAllow"];
+export const touchesPermissions = (patch) => PERMISSION_FIELDS.some((key) => Object.hasOwn(patch, key));
 /** A revocation stays live when its save fails; a widening never does. */
 export function keptRevocation(before, after, patch) {
     const fields = PERMISSION_FIELDS.filter((key) => Object.hasOwn(patch, key));

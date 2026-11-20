@@ -10,6 +10,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { anthropicKeyEnv } from "./anthropic-key-env.ts";
 import { withoutComputerEngine } from "./computer-engine-removal.ts";
 import { newBotDefaultsSchema, type NewBotDefaults } from "./new-bot-defaults.ts";
+import { defaultBotThreads } from "./bot-thread-limits.ts";
 import { replaySettings } from "./replay-settings.ts";
 import { EFFORT_LEVELS, type EffortLevel } from "../shared/wire.ts";
 import { isModelVariant, type InstanceConfigMap, type McpServerSpec, type ModelSelection } from "./contracts.ts";
@@ -31,7 +32,8 @@ export * from "./local-vm-settings.ts";
 
 const optionalText = z.string().optional();
 const SSH_ALIAS = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
-const SSH_USER_HOST = /^[A-Za-z0-9._-]+@[A-Za-z0-9][A-Za-z0-9.-]{0,253}$/;
+/** A VPS named directly: `user@host`, with the port when the daemon does not listen on 22. */
+const SSH_USER_HOST = /^[A-Za-z0-9._-]+@[A-Za-z0-9][A-Za-z0-9.-]{0,253}(?::\d{1,5})?$/;
 const LEGACY_BROWSER_PROFILE_ID = /^[A-Za-z0-9_-]{1,40}$/;
 const BROWSER_PROFILE_ID = /^[a-z0-9_-]{1,40}$/;
 
@@ -45,7 +47,7 @@ export const MAX_ROOM_TURN_TIMEOUT_MINUTES = 1_440;
 export const DEFAULT_MCP_CALL_TIMEOUT_MINUTES = 10;
 export const MIN_MCP_CALL_TIMEOUT_MINUTES = 1;
 export const MAX_MCP_CALL_TIMEOUT_MINUTES = 60;
-export const DEFAULT_MAX_CONCURRENT_BOT_THREADS = 3;
+/** The most threads one bot may run at once, whatever it saved. */
 export const MAX_CONCURRENT_BOT_THREADS = 16;
 /** The floor keeps a log tail large enough for the event inspector's recent-line window. */
 export const MIN_THREAD_EVENT_LOG_BYTES = 256 * 1024;
@@ -56,7 +58,21 @@ export function isValidSshAlias(value: unknown): value is string {
 }
 
 export function isValidSshUserHost(value: unknown): value is string {
-  return typeof value === "string" && SSH_USER_HOST.test(value);
+  return typeof value === "string" && SSH_USER_HOST.test(value) && validSshPort(value);
+}
+
+/** The port a `user@host` names, or null when it names none. */
+export function vpsSshPort(value: string): number | null {
+  const at = value.lastIndexOf(":");
+  if (at < 0) return null;
+  const port = Number.parseInt(value.slice(at + 1), 10);
+  return Number.isInteger(port) ? port : null;
+}
+
+/** A port outside the TCP range is a typo, not a VPS: reject it rather than let ssh fail late. */
+function validSshPort(value: string): boolean {
+  const port = vpsSshPort(value);
+  return port === null || (port >= 1 && port <= 65535);
 }
 
 export function isValidVpsSshTarget(value: unknown): value is string {
@@ -628,7 +644,7 @@ export function parseConfigPatch(value: JsonValue): ConfigPatch {
 }
 
 export function vpsSshAlias(cfg: AppConfig): string | null {
-  return isValidSshAlias(cfg.vps?.sshAlias) ? cfg.vps.sshAlias : null;
+  return isValidVpsSshTarget(cfg.vps?.sshAlias) ? cfg.vps.sshAlias : null;
 }
 
 /** Revalidated because the value is forwarded into a child process environment. */
@@ -649,7 +665,9 @@ export function cacheKeepWarmSettings(cfg: AppConfig): { enabled: boolean; windo
 }
 
 export function maxConcurrentBotThreads(cfg: { threads?: { maxConcurrentPerBot?: number } }): number {
-  return cfg.threads?.maxConcurrentPerBot ?? DEFAULT_MAX_CONCURRENT_BOT_THREADS;
+  // A saved number wins, and so does the memory gate on a Cloud home. Otherwise the default follows the machine: three
+  // parallel engines on a 3.8 GB phone is what makes the kernel stop one.
+  return cfg.threads?.maxConcurrentPerBot ?? defaultBotThreads();
 }
 
 export function threadEventLogMaxBytes(cfg: AppConfig): number | null {
@@ -961,7 +979,7 @@ export function saveConfig(
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
     const merged: JsonObject = current.success ? { ...current.data } : {};
-    if (key === "threads" && !current.success) merged.maxConcurrentPerBot = DEFAULT_MAX_CONCURRENT_BOT_THREADS;
+    if (key === "threads" && !current.success) merged.maxConcurrentPerBot = defaultBotThreads();
     Object.assign(merged, section);
     for (const [sectionKey, sectionValue] of Object.entries(section as Record<string, unknown>)) {
       if (sectionValue === null) delete merged[sectionKey];

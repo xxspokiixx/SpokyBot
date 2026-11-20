@@ -1,8 +1,9 @@
 import { cloudSyncRoutes } from "./cloud-sync.js";
 import { ownMcpHttpRoutes } from "./own-mcp-http.js";
+import { webPanelRoutes } from "./web-panels.js";
 export const PASS = Symbol("route.pass");
 /** Modules with no wiring from index.ts are listed here; index.ts pushes the rest. */
-export const ROUTES = [cloudSyncRoutes, ownMcpHttpRoutes];
+export const ROUTES = [cloudSyncRoutes, ownMcpHttpRoutes, webPanelRoutes];
 /** True means stop routing. A handler that wrote a response but returned PASS still counts as answered. */
 export async function dispatchRoutes(routes, ctx) {
     for (const route of routes) {

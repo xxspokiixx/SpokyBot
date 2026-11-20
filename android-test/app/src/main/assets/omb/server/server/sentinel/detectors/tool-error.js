@@ -1,6 +1,6 @@
 import { isHeldMemberLine } from "../../room-holds.js";
 import { failureKey, HARNESS_NOTICE, signatureOf, toolOrigin } from "../normalize.js";
-import { TURN_TIMEOUT_NOTICE } from "./turn-stop.js";
+import { isTurnTimeoutNotice } from "./turn-stop.js";
 export const SEVERITY_BY_ORIGIN = { harness: "high", external: "medium", shell: "low" };
 export const toolError = {
     name: "tool_error",
@@ -10,10 +10,10 @@ export const toolError = {
             if (record.type !== "tool" || record.ok)
                 continue;
             // a stopped room turn is turn_timeout's, not a tool's
-            if (record.tool === HARNESS_NOTICE && TURN_TIMEOUT_NOTICE.test(record.text))
+            if (record.tool === HARNESS_NOTICE && isTurnTimeoutNotice(record.text))
                 continue;
-            // a member the person held on purpose is not a failure
-            if (isHeldMemberLine(record.tool))
+            // a member the person held on purpose is not a failure: a status row reaches here as a harness notice with its words
+            if (isHeldMemberLine(record.tool) || (record.tool === HARNESS_NOTICE && isHeldMemberLine(record.text)))
                 continue;
             const origin = toolOrigin(record.tool);
             const { key, title } = failureKey(record.tool, record.text);

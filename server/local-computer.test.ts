@@ -23,6 +23,7 @@ import {
   gatedLocalComputer,
   readCuaConnection,
   validateLinuxDescriptorRuntime,
+  androidLocalComputerConnection,
 } from "./local-computer.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 
@@ -340,5 +341,89 @@ describe("local computer descriptor", () => {
     expect(readCuaConnection({ platform: "win32", userData })).toBeNull();
     writeFileSync(join(userData, "cua-connection.json"), JSON.stringify({ mode: "unknown", mcpCommand: "cua-driver", mcpArgs: ["mcp"] }));
     expect(readCuaConnection({ platform: "win32", userData })).toBeNull();
+  });
+});
+
+describe("android local computer descriptor", () => {
+  it("decodes the embedded android descriptor with script-first argument order", () => {
+    const userData = privateUserData("android-user-data");
+    const connection = {
+      mode: "embedded",
+      socketPath: "/data/user/0/com.openmausbot.app/files/cua.sock",
+      mcpCommand: "/data/user/0/com.openmausbot.app/files/node",
+      mcpArgs: ["mcp", "/data/user/0/com.openmausbot.app/files/android-local-computer.mjs"],
+      mcpEnv: { CUA_DRIVER_EMBEDDED: "1" },
+    };
+    writeFileSync(join(userData, "cua-connection.json"), JSON.stringify(connection), { mode: 0o600 });
+    expect(readCuaConnection({ platform: "android", userData })).toEqual({
+      command: "/data/user/0/com.openmausbot.app/files/node",
+      args: ["/data/user/0/com.openmausbot.app/files/android-local-computer.mjs", "mcp"],
+      env: { CUA_DRIVER_EMBEDDED: "1" },
+      platform: "android",
+      scope: "local-computer",
+    });
+  });
+
+  it("rejects unavailable status on android", () => {
+    const userData = privateUserData("android-unavailable");
+    writeFileSync(
+      join(userData, "cua-connection.json"),
+      JSON.stringify({ mode: "embedded", status: "unavailable", reason: "no tty" }),
+    );
+    expect(readCuaConnection({ platform: "android", userData })).toBeNull();
+  });
+
+  it("rejects missing socketPath, mcpCommand, or mcpArgs on android", () => {
+    const userData = privateUserData("android-incomplete");
+    writeFileSync(
+      join(userData, "cua-connection.json"),
+      JSON.stringify({ mode: "embedded", mcpCommand: "node", mcpArgs: ["mcp", "script.mjs"], mcpEnv: {} }),
+    );
+    expect(readCuaConnection({ platform: "android", userData })).toBeNull();
+    writeFileSync(
+      join(userData, "cua-connection.json"),
+      JSON.stringify({ mode: "embedded", socketPath: "/tmp/sock", mcpArgs: ["mcp", "script.mjs"], mcpEnv: {} }),
+    );
+    expect(readCuaConnection({ platform: "android", userData })).toBeNull();
+    writeFileSync(
+      join(userData, "cua-connection.json"),
+      JSON.stringify({ mode: "embedded", socketPath: "/tmp/sock", mcpCommand: "node", mcpEnv: {} }),
+    );
+    expect(readCuaConnection({ platform: "android", userData })).toBeNull();
+  });
+
+  it("rejects malformed mcpArgs on android (wrong order, non-string)", () => {
+    const userData = privateUserData("android-bad-args");
+    writeFileSync(
+      join(userData, "cua-connection.json"),
+      JSON.stringify({ mode: "embedded", socketPath: "/tmp/sock", mcpCommand: "node", mcpArgs: ["script.mjs", "mcp"], mcpEnv: {} }),
+    );
+    expect(readCuaConnection({ platform: "android", userData })).toBeNull();
+    writeFileSync(
+      join(userData, "cua-connection.json"),
+      JSON.stringify({ mode: "embedded", socketPath: "/tmp/sock", mcpCommand: "node", mcpArgs: ["mcp", 123], mcpEnv: {} }),
+    );
+    expect(readCuaConnection({ platform: "android", userData })).toBeNull();
+  });
+
+  it("androidLocalComputerConnection wrapper reads from userData", () => {
+    const userData = privateUserData("android-wrapper");
+    const connection = {
+      mode: "embedded",
+      socketPath: "/data/user/0/com.openmausbot.app/files/cua.sock",
+      mcpCommand: "/data/user/0/com.openmausbot.app/files/node",
+      mcpArgs: ["mcp", "/data/user/0/com.openmausbot.app/files/android-local-computer.mjs"],
+      mcpEnv: { CUA_DRIVER_EMBEDDED: "1" },
+    };
+    writeFileSync(join(userData, "cua-connection.json"), JSON.stringify(connection), { mode: 0o600 });
+    expect(androidLocalComputerConnection(userData)).toEqual({
+      command: "/data/user/0/com.openmausbot.app/files/node",
+      args: ["/data/user/0/com.openmausbot.app/files/android-local-computer.mjs", "mcp"],
+      env: { CUA_DRIVER_EMBEDDED: "1" },
+      platform: "android",
+      scope: "local-computer",
+    });
+    expect(androidLocalComputerConnection("")).toBeNull();
+    expect(androidLocalComputerConnection("/nonexistent/path")).toBeNull();
   });
 });

@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { spawnBotWork } from "../../oom-score.js";
 import { pipeTransport } from "../cdp/transport.js";
 import { chromeArgs, chromeEnv } from "./flags.js";
 import { diagnoseLaunchFailure } from "./host-setup.js";
@@ -70,7 +71,7 @@ export async function launchChrome(options) {
         sandboxHelper: options.sandboxHelper ?? null,
         profileMarker: options.profileMarker ?? null,
     });
-    const child = spawn(options.executablePath, argv, { stdio: ["ignore", "pipe", "pipe", "pipe", "pipe"], env, windowsHide: true });
+    const child = spawnBotWork(() => spawn(options.executablePath, argv, { stdio: ["ignore", "pipe", "pipe", "pipe", "pipe"], env, windowsHide: true }));
     let output = "";
     const keep = (chunk) => {
         output = (output + chunk.toString("utf8")).slice(-OUTPUT_LIMIT);
@@ -84,9 +85,14 @@ export async function launchChrome(options) {
             resolve({ code: null, signal: null });
         });
     });
+    const pid = child.pid;
+    if (pid !== undefined)
+        void exited.then(() => options.registry?.remove(pid));
     const transport = pipeTransport(child.stdio[3], child.stdio[4]);
     let version;
     try {
+        if (pid !== undefined)
+            options.registry?.add({ pid, startTime: null, userDataDir: options.userDataDir, ownerPid: process.pid, launchedAt: new Date().toISOString() });
         version = await handshake(transport, exited, options.handshakeTimeoutMs ?? 60_000);
     }
     catch (error) {
@@ -95,9 +101,6 @@ export async function launchChrome(options) {
         const diagnosis = await diagnoseLaunchFailure({ executable: options.executablePath, output, env }).catch(() => null);
         throw new ChromeLaunchError(diagnosis?.message ?? (error instanceof Error ? error.message : String(error)), output);
     }
-    const pid = child.pid;
-    options.registry?.add({ pid, startTime: null, userDataDir: options.userDataDir, ownerPid: process.pid, launchedAt: new Date().toISOString() });
-    void exited.then(() => options.registry?.remove(pid));
     const wait = (ms) => Promise.race([exited, new Promise((resolve) => setTimeout(() => resolve(null), ms))]);
     const stop = async (graceMs) => {
         const polite = await wait(graceMs);
@@ -120,7 +123,7 @@ export async function launchChrome(options) {
         return exited;
     };
     return {
-        pid,
+        pid: pid,
         argv,
         transport,
         version,

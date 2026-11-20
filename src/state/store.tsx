@@ -122,6 +122,8 @@ export interface Message extends Pick<import("../../shared/wire").WireMessage, "
   text?: string;
   digest?: TurnDigest;
   compaction?: import("../../shared/wire").WireMessage["compaction"];
+  checkBack?: import("../../shared/check-back").CheckBackLine;
+  handoff?: import("../../shared/handoff-status").HandoffStatusLine;
   attachments?: import("../../shared/wire").WireMessage["attachments"];
   card?: OptionCardData;
   connector?: ConnectorCardData;

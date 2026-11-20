@@ -16,6 +16,17 @@ export function cardText(card) {
 const failureStatus = { sign_in: 403, limit: 402, rate_limited: 429, gone: 410, refused: 400, unavailable: 503 };
 export function createPagePublisher(deps) {
     const { client, store } = deps;
+    // One publish at a time per bot and source, so two at once can't both find no page and each create one.
+    const queues = new Map();
+    const serially = (key, work) => {
+        const previous = queues.get(key) ?? Promise.resolve();
+        const run = previous.then(work, work);
+        const settled = run.catch(() => undefined);
+        queues.set(key, settled);
+        void settled.then(() => { if (queues.get(key) === settled)
+            queues.delete(key); });
+        return run;
+    };
     const markUnpublished = (pageId, usage) => {
         const record = store.forget(pageId);
         if (!record)
@@ -52,17 +63,20 @@ export function createPagePublisher(deps) {
             return publishBundle(input, { source: input.source, files: input.files, bytes: input.files.reduce((sum, file) => sum + file.data.byteLength, 0), skipped: [] });
         },
     };
-    async function publishBundle(input, bundle) {
+    function publishBundle(input, bundle) {
+        return serially(JSON.stringify([input.botId, bundle.source]), () => publishNow(input, bundle));
+    }
+    async function publishNow(input, bundle) {
         const title = pageTitle(input.title);
         if (!title)
             return TITLE_REQUIRED;
         const remembered = input.pageId ? store.get(input.pageId) : store.fromSource(input.botId, bundle.source);
         const target = input.pageId ?? remembered?.pageId;
-        let result = await client.publish({ title, files: bundle.files, ...(target ? { pageId: target } : {}) });
+        let result = await client.publish({ title, files: bundle.files, ...(target ? { pageId: target } : {}) }, input.call);
         // The page this folder was published to before is gone (unpublished, or taken down): it gets a new link.
         if (!result.ok && result.reason === "gone" && !input.pageId && target) {
             store.forget(target);
-            result = await client.publish({ title, files: bundle.files });
+            result = await client.publish({ title, files: bundle.files }, input.call);
         }
         if (!result.ok) {
             if (result.reason === "limit") {
@@ -108,7 +122,7 @@ export function createPagePublisher(deps) {
             if (!pageId)
                 return { status: 400, text: "Pass the page_id of the page to unpublish, or the path it was published from." };
             const title = store.get(pageId)?.title;
-            const result = await client.unpublish(pageId);
+            const result = await client.unpublish(pageId, input.call);
             if (!result.ok && result.reason !== "gone")
                 return { status: failureStatus[result.reason], text: result.message };
             const card = markUnpublished(pageId, result.ok ? result.usage : null)

@@ -1,12 +1,12 @@
 import { HIGHLEVEL_TOOL_NAMES } from "../../shared/highlevel.js";
 import { isReadOnlyAction } from "../../shared/connector-scopes.js";
 import { compileToolSchema, schemaProblems } from "../mcp-schema-validator.js";
-import { HighLevelError } from "./client.js";
+import { HighLevelError, PAGE_MAX, PAGE_NUMBER_MAX } from "./client.js";
 const ID = { type: "string", minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_.-]+$" };
 const TEXT = (maxLength, description) => ({ type: "string", maxLength, ...(description ? { description } : {}) });
 const TAGS = { type: "array", minItems: 1, maxItems: 50, items: { type: "string", minLength: 1, maxLength: 100 } };
-const PAGE = { type: "integer", minimum: 1, maximum: 1000, description: "Page number, from 1." };
-const LIMIT = { type: "integer", minimum: 1, maximum: 50, description: "Results per page, at most 50. Default 20." };
+const PAGE = { type: "integer", minimum: 1, maximum: PAGE_NUMBER_MAX, description: "Page number, from 1." };
+const LIMIT = { type: "integer", minimum: 1, maximum: PAGE_MAX, description: `Results per page, at most ${PAGE_MAX}. Default 20.` };
 const DATE = TEXT(64, "ISO 8601 date-time, e.g. 2026-10-20T15:00:00Z.");
 const CONTACT_FIELDS = {
     firstName: TEXT(200), lastName: TEXT(200), name: TEXT(400, "Full name; use firstName and lastName when you have them."),

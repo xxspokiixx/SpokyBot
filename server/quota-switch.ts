@@ -8,6 +8,7 @@ import type { EngineAccess, ModelCatalog, ModelSelection, ProviderAdapter, Provi
 import type { Coordinator } from "./coordinator.ts";
 import { readyToRun, selectDefaultModelSelection, type SelectableInstance } from "./default-model-selection.ts";
 import { classifyError } from "./drivers/retry.ts";
+import { outOfProcesses } from "./process-shortage.ts";
 import { PROBE_TIMEOUT_MS } from "./engine-install.ts";
 import { spokenLineFields } from "./live-call-record.ts";
 import type { WorkOrigin } from "./peer-provenance.ts";
@@ -203,6 +204,8 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
       const cause = deps.turnStops.failureCause(event);
       // A tool call's failure names the tool, never the engine's own limit, whatever its words.
       const scope: TakeoverScope | undefined = signedOutStop(event.stopReason, cause) ? "signed-out"
+        // A spawn the machine refused is nobody's limit: moving the work to another engine would fail the same way there.
+        : outOfProcesses(cause ?? "") ? undefined
         : flags?.limit ?? (event.stopReason !== "tool_error" && classifyError({ text: cause ?? "" }).reason === "quota" ? "engine" : undefined);
       if (!scope) return null;
       const thread = store.projectBotForTask(bot.id, threadId) ?? bot;

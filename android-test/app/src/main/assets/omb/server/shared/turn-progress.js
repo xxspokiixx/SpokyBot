@@ -22,5 +22,7 @@ export function progressFile(path) {
 /** Two reports that read the same on screen share a key, so only a visible change is worth a frame. */
 export function progressKey(event) {
     const size = progressSize(event.bytes);
-    return [event.turnId ?? "", event.itemId ?? "", event.activity, event.tool ?? "", event.file ?? "", size ? `${size.count}${size.unit}` : ""].join("|");
+    const quiet = event.quiet ? `${event.quiet.kind}${event.quiet.kind === "output" ? `@${event.quiet.at}` : ""}` : "";
+    return [event.turnId ?? "", event.itemId ?? "", event.activity, event.tool ?? "", event.file ?? "", size ? `${size.count}${size.unit}` : "",
+        event.target ?? "", event.detail ?? "", quiet, (event.tail ?? []).join("\n")].join("|");
 }

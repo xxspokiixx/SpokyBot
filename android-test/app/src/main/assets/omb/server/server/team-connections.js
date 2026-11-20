@@ -193,10 +193,18 @@ export class PeopleConnections {
         let manager = this.managers.get(person);
         if (!manager) {
             this.ensureDir();
-            manager = new McpOAuthManager({ file: join(this.dir, "mcp-oauth", `${person}.json`), clients: this.options.clients, isOwnerLive: this.options.isOwnerLive });
+            manager = new McpOAuthManager({
+                file: join(this.dir, "mcp-oauth", `${person}.json`), clients: this.options.clients, isOwnerLive: this.options.isOwnerLive,
+                ...(this.options.onSettled ? { onSettled: this.options.onSettled } : {}),
+            });
             this.managers.set(person, manager);
         }
         return manager;
+    }
+    /** The member's own sign-in and key for a personal server, to test it as them. */
+    connection(person, name, url) {
+        const key = this.key(person, name, url);
+        return { oauth: this.oauth(person), ...(key ? { key } : {}) };
     }
     /** Managers with a flow that may be waiting for its callback (made in this process). */
     liveManagers() {
