@@ -64,8 +64,8 @@ describe("a Pokémon body", () => {
   it("draws its own parts and the same carved face", () => {
     const markup = renderToStaticMarkup(createElement(MausAvatar, { color: "orange", bodyId: "pikachu", animated: false }));
     expect(markup).toContain('data-carved-body="pikachu"');
-    // Its two ears, body and cheek mark, plus the clip path and the smile the face adds.
-    expect(markup.match(/<path /g)?.length).toBe(6);
+    // Its two ears, body and two cheek marks, plus the clip path and the smile the face adds.
+    expect(markup.match(/<path /g)?.length).toBe(7);
     expect(markup.match(/<rect /g)?.length).toBe(2);
     expect(markup).not.toContain("linearGradient");
   });
