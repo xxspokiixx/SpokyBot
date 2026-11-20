@@ -1,10 +1,12 @@
-// Build Android APK with versioning: 0.PR_NUMBER.COMMIT_NUMBER
-// PR number from latest merged PR, commit number = commits since that PR merge
+// Build Android APK. The version comes from scripts/android-version.mjs, the same module CI uses:
+// the commit count, scaled above every published release, so an update always installs over the last.
 
 import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { androidVersion, commitCount } from "./android-version.mjs";
 
 const __dirname = join(fileURLToPath(import.meta.url), "..");
 const ROOT = join(__dirname, "..");
@@ -15,34 +17,6 @@ const PACKAGE_JSON = join(ROOT, "package.json");
 function run(cmd, cwd = ROOT) {
   console.log(`$ ${cmd}`);
   return execSync(cmd, { cwd, encoding: "utf8", stdio: "inherit" });
-}
-
-function runCapture(cmd, cwd = ROOT) {
-  console.log(`$ ${cmd}`);
-  return execSync(cmd, { cwd, encoding: "utf8" }).trim();
-}
-
-// Get latest merged PR number from git log
-function getLatestMergedPR() {
-  // Look for "Merge pull request #XXX" in recent commits
-  const log = runCapture('git log --oneline -50 --grep="Merge pull request"', ROOT);
-  const match = log.match(/Merge pull request #(\d+)/);
-  if (match) return parseInt(match[1], 10);
-  // Fallback: check the latest commit message if it's a merge
-  const latestMsg = runCapture("git log -1 --pretty=%B", ROOT);
-  const fallbackMatch = latestMsg.match(/Merge pull request #(\d+)/);
-  if (fallbackMatch) return parseInt(fallbackMatch[1], 10);
-  return 0; // unknown
-}
-
-// Get commit count since the latest PR merge
-function getCommitsSinceLastPR(prNumber) {
-  // Find the commit hash of the PR merge
-  const mergeCommit = runCapture(`git log --oneline --grep="Merge pull request #${prNumber}" -1 --pretty=%H`, ROOT);
-  if (!mergeCommit) return 1;
-  // Count commits since that merge (excluding the merge itself)
-  const count = runCapture(`git rev-list ${mergeCommit}..HEAD --count`, ROOT);
-  return parseInt(count, 10) || 1;
 }
 
 // Update version in build.gradle.kts
@@ -66,14 +40,8 @@ async function main() {
   console.log("=== Building Android APK ===\n");
 
   // Step 1: Determine version
-  const prNumber = getLatestMergedPR();
-  const commitNumber = getCommitsSinceLastPR(prNumber);
-  const versionName = `0.${prNumber}.${commitNumber}`;
-  // versionCode must be integer, monotonically increasing. Use PR*1000 + commit
-  const versionCode = prNumber * 1000 + commitNumber;
+  const { versionCode, versionName } = androidVersion(commitCount(ROOT));
 
-  console.log(`PR Number: ${prNumber}`);
-  console.log(`Commit Number (since PR merge): ${commitNumber}`);
   console.log(`Version Name: ${versionName}`);
   console.log(`Version Code: ${versionCode}\n`);
 

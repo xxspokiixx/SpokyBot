@@ -100,6 +100,10 @@ jobs:
           # Brand the APK as SpokyBot (as used in prepare-android-assets.mjs)
           OMB_TEST_BRAND: SpokyBot
 
+      - name: Set the build number
+        id: version
+        run: node scripts/stamp-android-version.mjs
+
       - name: Build Android APK
         run: |
           cd android-test
@@ -119,14 +123,6 @@ jobs:
           # Get APK size
           SIZE=$(stat -c%s "$APK_PATH")
           echo "APK size: $((SIZE / 1024 / 1024)) MB"
-
-      - name: Get version info
-        id: version
-        run: |
-          # Extract version from package.json
-          VERSION=$(node -p "require('./package.json').version")
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
 
       - name: Create or update release
         uses: softprops/action-gh-release@v2
