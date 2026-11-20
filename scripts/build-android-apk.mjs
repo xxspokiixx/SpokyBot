@@ -51,11 +51,18 @@ async function main() {
   // Step 2b: Update package.json for UI display
   updatePackageJsonVersion(versionName);
 
-  // Step 3: Run prepare-android-assets.mjs (stages server, UI, engine, skills)
+  // Step 3: Rebuild the server bundle now that package.json carries this build's
+  // version. The bundle copies that version into dist-server/package.json and
+  // the server reports it, so a stale bundle ships an APK whose own About page
+  // and doctor line name a different build.
+  console.log("\n=== Bundling server ===");
+  run("node scripts/bundle-server.mjs");
+
+  // Step 4: Run prepare-android-assets.mjs (stages server, UI, engine, skills)
   console.log("\n=== Preparing Android assets ===");
   run("node prepare-android-assets.mjs", ANDROID_DIR);
 
-  // Step 4: Build APK using Gradle
+  // Step 5: Build APK using Gradle
   console.log("\n=== Building APK ===");
   // `sh gradlew` on POSIX runners: git on Windows records no exec bit for the
   // wrapper script, so a direct ./gradlew would fail with permission denied.
@@ -66,7 +73,7 @@ async function main() {
     process.platform === "win32" ? JSON.stringify(join(ANDROID_DIR, "gradlew.bat")) : "sh gradlew";
   run(`${gradlew} :app:assembleDebug`, ANDROID_DIR);
 
-  // Step 5: Show output location
+  // Step 6: Show output location
   const apkPath = join(ANDROID_DIR, "app", "build", "outputs", "apk", "debug", "app-debug.apk");
   console.log(`\n=== APK built at: ${apkPath} ===`);
 }
