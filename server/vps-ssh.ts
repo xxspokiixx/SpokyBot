@@ -39,6 +39,18 @@ function writeIfChanged(path: string, content: string, mode: number): void {
   renameSync(temp, path);
 }
 
+/** The staged identities the asset extractor leaves world-readable, which OpenSSH refuses to use. */
+function stagedIdentities(sshDir: string): string[] {
+  return ["id_ed25519", "id_ecdsa", "id_rsa", "id_dsa"]
+    .map((name) => join(sshDir, name))
+    .filter((path) => existsSync(path))
+    .map((path) => {
+      // A key lands with its copied mode, and OpenSSH rejects one any group or other can read.
+      try { chmodSync(path, 0o600); } catch { /* a key the app does not own */ }
+      return path;
+    });
+}
+
 /** ssh keeps the first value it sees, so the person's file goes first; -F skips the system file, so it goes last. */
 export function vpsSshConfigText(
   controlSocket: string,
@@ -46,6 +58,7 @@ export function vpsSshConfigText(
   shareConnection: boolean,
   userConfig = join(homedir(), ".ssh", "config"),
   systemConfig = "/etc/ssh/ssh_config",
+  identities: string[] = [],
 ): string {
   const controlPath = `${controlSocket.replace(/%/g, "%%").replace(/\/+$/, "")}/cm-%C`;
   return [
@@ -67,6 +80,10 @@ export function vpsSshConfigText(
     // "Host key verification failed". accept-new records the key and still refuses one that changed.
     "  StrictHostKeyChecking accept-new",
     `  UserKnownHostsFile ${JSON.stringify(knownHosts)}`,
+    // Nothing reads ~/.ssh inside the guest, and the phone's app storage is not a home ssh looks
+    // in, so the config names the staged keys itself. IdentityFile never prompts: naming them all
+    // in one connection is what makes a key found rather than guessed per host.
+    ...identities.map((path) => `  IdentityFile ${JSON.stringify(path)}`),
     ...(existsSync(systemConfig) ? [`Include ${JSON.stringify(systemConfig)}`] : []),
     "",
   ].join("\n");
@@ -104,7 +121,7 @@ export function prepareVpsSsh(dataDir: string, pathValue: string, platform: Node
   // and the app owns this file, so it never writes into the person's own one.
   const knownHosts = join(sshDir, "known_hosts");
   if (!existsSync(knownHosts)) writeIfChanged(knownHosts, "", 0o600);
-  writeIfChanged(configPath, vpsSshConfigText(control, knownHosts, share), 0o600);
+  writeIfChanged(configPath, vpsSshConfigText(control, knownHosts, share, undefined, undefined, stagedIdentities(sshDir)), 0o600);
   const realSsh = findExecutable("ssh", pathValue, binDir);
   if (!realSsh) return { configPath, path: pathValue };
   const shim = [

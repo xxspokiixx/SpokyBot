@@ -128,18 +128,17 @@ if (existsSync(join(linuxRuntime, "rootfs.tar.gz"))) {
   mkdirSync(linuxTarget, { recursive: true });
   // aapt transparently decompresses *.gz assets (a 450 MB tarball became a
   // 1.25 GB APK entry); an opaque extension keeps the compressed bytes.
-  for (const name of ["rootfs.tar.gz", "proot", "loader", "libtalloc.so.2", "libandroid-shmem.so", "omb-guest-chromium", "setup-graphical-desktop.sh"]) {
-    const source = join(linuxRuntime, name);
+  for (const name of ["rootfs.tar.gz", "proot", "loader", "libtalloc.so.2", "libandroid-shmem.so", "omb-guest-chromium", "setup-graphical-desktop.sh", "start-graphical-desktop.sh", "xwd-to-png.py"]) {
+    // The desktop launcher and the screenshot converter are maintained in android-test/linux/ beside the
+    // other guest scripts, but a runtime payload may carry its own copy; either place is staged, the
+    // maintained one first.
+    const source = name === "start-graphical-desktop.sh" || name === "xwd-to-png.py"
+      ? [join(ROOT, "android-test", "linux", name), join(linuxRuntime, name)].find((candidate) => existsSync(candidate))
+      : join(linuxRuntime, name);
     const target = name === "rootfs.tar.gz" ? join(linuxTarget, "rootfs.blob") : join(linuxTarget, name);
-    if (existsSync(source)) {
+    if (source && existsSync(source)) {
       copyFileSync(source, target);
     }
-  }
-  // Copy debs folder for graphical desktop (no network required on device)
-  const debsSource = join(linuxRuntime, "debs");
-  const debsTarget = join(linuxTarget, "debs");
-  if (existsSync(debsSource)) {
-    cpSync(debsSource, debsTarget, { recursive: true });
   }
   copyFileSync(linuxMcp, join(linuxTarget, "android-local-computer.mjs"));
   copyFileSync(join(ROOT, "android-test", "linux", "android-device-phone.mjs"), join(linuxTarget, "android-device-phone.mjs"));

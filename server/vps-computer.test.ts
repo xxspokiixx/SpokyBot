@@ -13,6 +13,55 @@ function posix(value: string): string {
   return sep === "/" ? value : value.split(sep).join("/");
 }
 
+/** Splits a shell word list the way a POSIX shell does: backslash escapes outside quotes, and a
+ *  single-quoted run is literal — which is how the guest line carries `'\''` for an apostrophe. */
+function sshArgv(line: string): string[] {
+  const words: string[] = [];
+  let current = "";
+  let started = false;
+  let mode: "plain" | "single" | "double" = "plain";
+  for (let index = 0; index < line.length; index++) {
+    const char = line[index]!;
+    if (mode === "single") {
+      if (char === "'") mode = "plain";
+      else current += char;
+      continue;
+    }
+    if (mode === "double") {
+      if (char === '"') mode = "plain";
+      else if (char === "\\" && index + 1 < line.length) current += line[++index]!;
+      else current += char;
+      continue;
+    }
+    if (char === "'") { mode = "single"; started = true; continue; }
+    if (char === '"') { mode = "double"; started = true; continue; }
+    if (char === "\\" && index + 1 < line.length) { current += line[++index]!; started = true; continue; }
+    if (char === " " || char === "\t") {
+      if (started) words.push(current);
+      current = "";
+      started = false;
+      continue;
+    }
+    current += char;
+    started = true;
+  }
+  if (started) words.push(current);
+  return words;
+}
+
+/** The docker argv a guest ssh line carries. ssh passes the remote command as its last argument,
+ *  and the guest's bash line is `… exec 'ssh' … '<remote command>'`. Two shapes reach here: the
+ *  ssh argv itself, and the proot bash line that carries it. */
+function dockerArgv(line: string): string[] {
+  const words = sshArgv(line);
+  const remote = words.at(-1) ?? "";
+  const argv = remote.startsWith("docker ") ? sshArgv(remote) : words;
+  const at = argv.indexOf("docker");
+  return at < 0 ? [] : argv.slice(at + 1);
+}
+
+/** Splits the quoted remote command back into words, honouring the single quotes around it. */
+
 const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }));
 vi.mock("node:child_process", async () => ({
   ...(await vi.importActual<typeof import("node:child_process")>("node:child_process")),
@@ -294,7 +343,19 @@ describe("VPS SSH transport on the phone", () => {
       const args = vpsRemoteDockerArgs(alias, ["ps"]);
       // The docker CLI runs on the VPS, so the app never spawns one: argv is an ssh command.
       expect(args.slice(0, 2)).toEqual(["ssh", "-F"]);
-      expect(args.slice(3)).toEqual([alias, "docker", "ps"]);
+      expect(args.slice(3)).toEqual([alias, "docker ps"]);
+    } finally {
+      Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    }
+  });
+
+  it("escapes a remote argument the far shell would otherwise split", () => {
+    Object.defineProperty(process, "platform", { value: "android", configurable: true });
+    try {
+      const args = vpsRemoteDockerArgs("phone-vps", ["exec", "c", "sh", "-c", "echo 'two words'", "x"]);
+      // ssh joins its remote argv with spaces and the far shell parses the result again.
+      expect(args.at(-1)).toContain(`'echo '\\''two words'\\'''`);
+      expect(args.at(-1)?.startsWith("docker exec c sh -c ")).toBe(true);
     } finally {
       Object.defineProperty(process, "platform", { value: "win32", configurable: true });
     }
@@ -370,7 +431,8 @@ describe("VPS SSH transport on the phone", () => {
       // Exactly one ssh starts the guest command: the target is a host, never a second ssh.
       expect(bash.match(/'ssh'/g) ?? []).toHaveLength(1);
       expect(bash).toContain("'debian@149.56.209.10'");
-      expect(bash).toContain("'docker' 'ps'");
+      // The remote command is one token, so the far shell receives it whole.
+      expect(bash).toContain("'docker ps'");
     } finally {
       Object.defineProperty(process, "platform", { value: "win32", configurable: true });
       if (earlier.linux === undefined) delete process.env.OMB_ANDROID_LINUX_DIR;
@@ -867,6 +929,60 @@ describe("VPS computer", () => {
     }
   });
 
+  it("on the phone, asks the guest's ssh for the preview instead of a docker CLI it lacks", async () => {
+    const linuxDir = mkdtempSync(join(tmpdir(), "omb-vps-shot-"));
+    const earlier = { linux: process.env.OMB_ANDROID_LINUX_DIR, rootfs: process.env.OMB_ANDROID_ROOTFS };
+    writeFileSync(join(linuxDir, "proot"), "");
+    writeFileSync(join(linuxDir, "loader"), "");
+    mkdirSync(join(linuxDir, "tmp"), { recursive: true });
+    const rootfs = join(linuxDir, "rootfs");
+    mkdirSync(join(rootfs, "usr/bin"), { recursive: true });
+    mkdirSync(join(rootfs, "usr/lib/aarch64-linux-gnu"), { recursive: true });
+    writeFileSync(join(rootfs, "usr/bin/ssh"), "");
+    writeFileSync(join(rootfs, "usr/lib/aarch64-linux-gnu/libgssapi_krb5.so.2"), "");
+    process.env.OMB_ANDROID_LINUX_DIR = linuxDir;
+    process.env.OMB_ANDROID_ROOTFS = rootfs;
+    Object.defineProperty(process, "platform", { value: "android", configurable: true });
+    const fake = fixture();
+    spawnMock.mockImplementation((_command: string, argv: string[]) => {
+      const child = Object.assign(new EventEmitter(), {
+        stdin: new Writable({ write: (_c: unknown, _e: unknown, cb: () => void) => cb() }),
+        stdout: new PassThrough(), stderr: new PassThrough(),
+        kill: () => true,
+      });
+      queueMicrotask(() => {
+        void fake.runner(["-H", "ssh://phone-vps", ...dockerArgv(argv.at(-1) ?? "")]).then((output) => {
+          child.stdout.end(output.stdout);
+          child.emit("close", 0, null);
+        }, (error: Error) => {
+          child.stderr.end(error.message);
+          child.emit("close", 1, null);
+        });
+      });
+      return child;
+    });
+    try {
+      const cfg: AppConfig = { vps: { sshAlias: "phone-vps" } };
+      const frame = await vpsComputerScreenshot(cfg, BOT_ID);
+      expect(frame.format).toBe("png");
+      // Every spawn is proot: no docker CLI is asked for, and ssh never sees docker's -H.
+      const spawned = spawnMock.mock.calls.map(([binary]) => String(binary));
+      expect(spawned).toContain(join(linuxDir, "proot"));
+      expect(spawned.some((binary) => /(^|[\\/])docker$/.test(binary))).toBe(false);
+      for (const [, argv] of spawnMock.mock.calls as Array<[string, string[]]>) {
+        expect(argv.join(" ")).not.toContain("'-H'");
+      }
+    } finally {
+      spawnMock.mockReset();
+      Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+      if (earlier.linux === undefined) delete process.env.OMB_ANDROID_LINUX_DIR;
+      else process.env.OMB_ANDROID_LINUX_DIR = earlier.linux;
+      if (earlier.rootfs === undefined) delete process.env.OMB_ANDROID_ROOTFS;
+      else process.env.OMB_ANDROID_ROOTFS = earlier.rootfs;
+      rmSync(linuxDir, { recursive: true, force: true });
+    }
+  });
+
   it("bounds the complete slow preview, holds its lock through timed-out cleanup, and recovers", async () => {
     vi.useFakeTimers();
     try {
@@ -1355,5 +1471,60 @@ describe("remote desktop tunnel ownership", () => {
       await vi.advanceTimersByTimeAsync(30_001);
       expect(child.kill).toHaveBeenCalledTimes(1);
     } finally { closeAllVpsDesktopTunnels(); vi.useRealTimers(); }
+  });
+
+  it("opens the phone's viewer tunnel through proot, where no host ssh exists", async () => {
+    const linuxDir = mkdtempSync(join(tmpdir(), "omb-vps-tunnel-"));
+    const earlier = { linux: process.env.OMB_ANDROID_LINUX_DIR, rootfs: process.env.OMB_ANDROID_ROOTFS };
+    writeFileSync(join(linuxDir, "proot"), "");
+    writeFileSync(join(linuxDir, "loader"), "");
+    mkdirSync(join(linuxDir, "tmp"), { recursive: true });
+    // The client install is a separate proot run; present the files it checks for so the tunnel
+    // is the only spawn this test drives.
+    const rootfs = join(linuxDir, "rootfs");
+    mkdirSync(join(rootfs, "usr/bin"), { recursive: true });
+    mkdirSync(join(rootfs, "usr/lib/aarch64-linux-gnu"), { recursive: true });
+    writeFileSync(join(rootfs, "usr/bin/ssh"), "");
+    writeFileSync(join(rootfs, "usr/lib/aarch64-linux-gnu/libgssapi_krb5.so.2"), "");
+    process.env.OMB_ANDROID_LINUX_DIR = linuxDir;
+    process.env.OMB_ANDROID_ROOTFS = rootfs;
+    Object.defineProperty(process, "platform", { value: "android", configurable: true });
+    let server: Server | undefined;
+    const child = Object.assign(new EventEmitter(), {
+      exitCode: null as number | null, killed: false, stderr: new PassThrough(),
+      kill: vi.fn(() => { child.killed = true; server?.close(); child.emit("close", 0); return true; }),
+    });
+    spawnMock.mockImplementation((_binary: string, argv: string[]) => {
+      // The forward rides the guest's bash line, so the port is read out of the quoting there.
+      const forward = /'-L' '([^']+)'/.exec(argv.at(-1) ?? "")?.[1];
+      const port = Number(forward?.split(":")[1]);
+      // The ssh client install runs through the same launcher and carries no forward.
+      if (Number.isInteger(port) && port > 0) server = createServer(socket => socket.end()).listen(port, "127.0.0.1");
+      return child;
+    });
+    try {
+      // The android transport hands over an ssh argv; the fixture speaks docker's own.
+      const inner = fixture().runner;
+      const runner: VpsCommandRunner = (args, options) =>
+        inner(["-H", "ssh://vps", ...dockerArgv(args.at(-1) ?? "")], options);
+      await vpsComputerJoin(CONFIG, BOT_ID, runner, true);
+      const [binary, argv] = spawnMock.mock.calls.at(-1)! as [string, string[]];
+      expect(binary).toBe(join(linuxDir, "proot"));
+      const bash = argv.at(-1)!;
+      // One ssh, and one config: the argv the guest runs carries no second prefix.
+      expect(bash.match(/'ssh'/g) ?? []).toHaveLength(1);
+      expect(bash.match(/'-F'/g) ?? []).toHaveLength(1);
+      expect(bash).toContain("'-N'");
+      expect(vpsDesktopConnection(BOT_ID)).toBeTruthy();
+    } finally {
+      child.kill();
+      closeAllVpsDesktopTunnels();
+      Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+      if (earlier.linux === undefined) delete process.env.OMB_ANDROID_LINUX_DIR;
+      else process.env.OMB_ANDROID_LINUX_DIR = earlier.linux;
+      if (earlier.rootfs === undefined) delete process.env.OMB_ANDROID_ROOTFS;
+      else process.env.OMB_ANDROID_ROOTFS = earlier.rootfs;
+      rmSync(linuxDir, { recursive: true, force: true });
+    }
   });
 });

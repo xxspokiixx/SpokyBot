@@ -2,7 +2,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createConnection, createServer, type AddressInfo } from "node:net";
-import { chmodSync, existsSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { join, sep } from "node:path";
 
 import {
@@ -188,6 +188,14 @@ export function vpsDockerArgs(alias: string, args: string[]): string[] {
   return ["-H", `ssh://${alias}`, ...args];
 }
 
+/** ssh joins its remote argv with spaces and the far shell then parses that line again, so anything
+ *  with a space, a quote or a glob (the Cua scripts here carry all three) has to be escaped before
+ *  it is handed over, or the remote shell splits it. Tokens that are already safe stay as they are. */
+function remoteShellJoin(tokens: string[]): string {
+  const safe = /^[A-Za-z0-9_@%+=:,./-]+$/;
+  return tokens.map((token) => (safe.test(token) ? token : shellQuote(token))).join(" ");
+}
+
 /**
  * The phone shell ships no docker CLI, so `docker -H ssh://…` cannot start: `spawn docker` fails
  * with EACCES. There the container is driven from the VPS side instead, through the rootfs's ssh
@@ -209,8 +217,7 @@ export function vpsRemoteDockerArgs(alias: string, args: string[]): string[] {
     ...vpsIdentityArgs(),
     ...(port === null ? [] : ["-p", String(port)]),
     target,
-    "docker",
-    ...args,
+    remoteShellJoin(["docker", ...args]),
   ];
 }
 
@@ -286,47 +293,63 @@ async function ensureAndroidSshClient(linuxDir: string, rootfs: string): Promise
   });
 }
 
+export interface VpsSshLaunch {
+  command: string;
+  args: string[];
+  env: NodeJS.ProcessEnv;
+}/** vpsRemoteDockerArgs builds a complete `ssh -F …` argv for the guest, and the launcher supplies
+ *  the client and its config itself. Only a leading `-F` is dropped: the identity and timeout
+ *  options around it are the caller's, and `-N -L` must survive untouched. */
+function sshClientArgv(args: string[]): string[] {
+  const rest = args[0] === "ssh" ? args.slice(1) : [...args];
+  return rest[0] === "-F" && rest.length > 1 ? rest.slice(2) : rest;
+}
+
 /**
- * The phone has no ssh client on its own PATH either, so the rootfs's one drives the VPS through
- * proot. The app's ssh directory rides the bind at its host path, which keeps the generated
- * config's `Include` lines and every IdentityFile valid inside the guest.
+ * The one place that starts the VPS ssh client. Android denies exec of a binary the app writes
+ * into its own data directory and ships no client on PATH, so there the rootfs's ssh runs inside
+ * proot; everywhere else the app's shim supplies the shared config. Exported because the MCP
+ * bridge starts the same client to reach the bot's container.
  */
-async function androidSshRunner(args: string[], options: VpsCommandOptions): Promise<{ stdout: string; stderr: string }> {
-  const { spawn } = await import("node:child_process");
-  const { join } = await import("node:path");
-  const { existsSync, mkdirSync } = await import("node:fs");
+export async function vpsSshLaunch(args: string[]): Promise<VpsSshLaunch> {
+  const sshArgs = sshClientArgv(args);
+  if (process.platform !== "android") {
+    const ssh = prepareVpsSsh(DATA_DIR, augmentedPath());
+    return {
+      command: "ssh",
+      args: ssh.configPath ? ["-F", ssh.configPath, ...sshArgs] : sshArgs,
+      env: { ...process.env, PATH: ssh.path },
+    };
+  }
   const linuxDir = process.env.OMB_ANDROID_LINUX_DIR;
   const rootfs = process.env.OMB_ANDROID_ROOTFS;
-  const sshDir = join(DATA_DIR, VPS_SSH_DIR);
   if (!linuxDir || !rootfs) throw Object.assign(new Error("the Android Linux environment is not configured"), { status: 409 });
+  const sshDir = join(DATA_DIR, VPS_SSH_DIR);
   mkdirSync(sshDir, { recursive: true, mode: 0o700 });
   // Written here so the guest sees it even when the host PATH carries no ssh to shim.
   prepareVpsSsh(DATA_DIR, augmentedPath());
   await ensureAndroidSshClient(linuxDir, rootfs);
   const prootPath = join(linuxDir, "proot");
   if (!existsSync(prootPath)) throw Object.assign(new Error("the Android Linux environment has no proot"), { status: 409 });
-  // vpsRemoteDockerArgs already hands over a complete ssh argv carrying -F and the identity, so
-  // the guest runs it as it stands; adding the prefix again would turn the second `ssh` into a
-  // hostname and the command would never reach the VPS.
-  const guestArgs = args[0] === "ssh"
-    ? args
-    : ["ssh", "-F", `${posixPath(sshDir)}/config`, ...args];
+  const configured = sshArgs[0] === "-F" ? sshArgs : ["-F", `${posixPath(sshDir)}/config`, ...sshArgs];
   // proot shadows /etc/passwd with an empty placeholder, so every getpwuid() fails and OpenSSH
   // aborts with "No user exists for uid 0" before it opens a socket. Bind the rootfs's own NSS
   // files back in and name resolution works. The app's ssh dir rides its host path, so the
   // generated config and every IdentityFile in it stay addressable inside the guest.
-  const child = spawn(prootPath, [
-    "-R", rootfs,
-    "-0",
-    "-b", `${rootfs}/etc/passwd:/etc/passwd`,
-    "-b", `${rootfs}/etc/group:/etc/group`,
-    "-b", `${rootfs}/etc/shadow:/etc/shadow`,
-    "-b", `${sshDir}:/${sshDir.replace(/^\//, "")}`,
-    "-b", `${linuxDir}:/host-linux`,
-    "-b", `${join(linuxDir, "tmp")}:/tmp`,
-    "-w", "/root", "/bin/bash", "-lc",
-    `export PATH="/usr/bin:/bin:$PATH"; ${guestArgs.map(shellQuote).join(" ")}`,
-  ], {
+  return {
+    command: prootPath,
+    args: [
+      "-R", rootfs,
+      "-0",
+      "-b", `${rootfs}/etc/passwd:/etc/passwd`,
+      "-b", `${rootfs}/etc/group:/etc/group`,
+      "-b", `${rootfs}/etc/shadow:/etc/shadow`,
+      "-b", `${sshDir}:/${sshDir.replace(/^\//, "")}`,
+      "-b", `${linuxDir}:/host-linux`,
+      "-b", `${join(linuxDir, "tmp")}:/tmp`,
+      "-w", "/root", "/bin/bash", "-lc",
+      `export PATH="/usr/bin:/bin:$PATH"; exec ${["ssh", ...configured].map(shellQuote).join(" ")}`,
+    ],
     env: {
       PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
       HOME: "/root",
@@ -338,6 +361,13 @@ async function androidSshRunner(args: string[], options: VpsCommandOptions): Pro
       PROOT_LOADER: join(linuxDir, "loader"),
       DEBIAN_FRONTEND: "noninteractive",
     },
+  };
+}
+
+async function androidSshRunner(args: string[], options: VpsCommandOptions): Promise<{ stdout: string; stderr: string }> {
+  const launch = await vpsSshLaunch(args);
+  const child = spawn(launch.command, launch.args, {
+    env: launch.env,
     stdio: ["pipe", "pipe", "pipe"],
   });
   return new Promise((resolve, reject) => {
@@ -1381,10 +1411,10 @@ export async function vpsComputerJoin(
   }
 
   const localPort = await unusedLoopbackPort();
-  const ssh = prepareVpsSsh(DATA_DIR, augmentedPath());
-  const child = spawn("ssh", vpsSshTunnelArgs(alias, localPort, connection.privateIp, ssh.configPath), {
+  const launch = await vpsSshLaunch(vpsSshTunnelArgs(alias, localPort, connection.privateIp));
+  const child = spawn(launch.command, launch.args, {
     shell: false,
-    env: { ...process.env, PATH: ssh.path },
+    env: launch.env,
     stdio: ["ignore", "ignore", "pipe"],
     windowsHide: true,
   });
@@ -1422,6 +1452,26 @@ export async function vpsComputerJoin(
   expiry.unref?.();
   desktopTunnels.set(botId, { child, joinUrl, expiry, viewers: 0, localViewer: !remoteViewer });
   return { joinUrl, state: "running" };
+}
+
+/** The bot drives its VPS container through Cua's MCP server, which the app reaches with the same
+ *  client the rest of this module uses: docker locally, or the guest's ssh where there is none.
+ *  `liveness` probes the transport, not the driver, so a desktop mid-tool-call never looks dead. */
+export async function vpsContainerMcpLaunch(alias: string, containerName: string): Promise<VpsSshLaunch & {
+  liveness: { command: string; args: string[] };
+}> {
+  if (!isValidVpsSshTarget(alias) || (!CONTAINER_NAME.test(containerName) && !CONTAINER_ID.test(containerName))) {
+    throw new Error("invalid VPS MCP connection");
+  }
+  const mcp = cuaExecArgs(["mcp", "--socket", CUA_SOCKET], { container: containerName, interactive: true });
+  const version = ["version", "--format", "{{.Server.Version}}"];
+  if (process.platform !== "android") {
+    const ssh = prepareVpsSsh(DATA_DIR, augmentedPath());
+    const env = { ...process.env, PATH: ssh.path };
+    return { command: "docker", args: vpsDockerArgs(alias, mcp), env, liveness: { command: "docker", args: vpsDockerArgs(alias, version) } };
+  }
+  const launch = await vpsSshLaunch(vpsRemoteDockerArgs(alias, mcp));
+  return { ...launch, liveness: { command: launch.command, args: (await vpsSshLaunch(vpsRemoteDockerArgs(alias, version))).args } };
 }
 
 export function vpsContainerMcpArgs(alias: string, containerName: string): string[] {
@@ -1512,7 +1562,7 @@ export async function vpsComputerScreenshot(
     let frame: VpsScreenshot;
     try {
       await boundedRunner(
-        vpsDockerArgs(
+        vpsRemoteDockerArgs(
           alias,
           cuaExecArgs(
             ["call", "get_desktop_state", "{}", "--socket", CUA_SOCKET, "--screenshot-out-file", SCREENSHOT_PATH],

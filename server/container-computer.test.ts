@@ -1278,7 +1278,8 @@ describe("Android proot desktop status and actions", () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-android-desktop-up-"));
     const linuxDir = join(dir, "linux");
     mkdirSync(join(linuxDir, "tmp", ".X11-unix"), { recursive: true });
-    writeFileSync(join(linuxDir, "tmp", ".X11-unix", "X3"), "");
+    // The phone's desktop runs on :1, the display its own start script creates.
+    writeFileSync(join(linuxDir, "tmp", ".X11-unix", "X1"), "");
     const ready = join(linuxDir, "tmp", "desktop-ready");
     const listen = () =>
       new Promise<{ port: number; close: () => void }>((resolve, reject) => {
@@ -1304,7 +1305,7 @@ describe("Android proot desktop status and actions", () => {
       writeFileSync(ready, "1794623516 27414\n");
       expect(await isAndroidDesktopUp(linuxDir, { ready, viewerPort: viewer.port })).toBe(true);
 
-      rmSync(join(linuxDir, "tmp", ".X11-unix", "X3"));
+      rmSync(join(linuxDir, "tmp", ".X11-unix", "X1"));
       expect(await isAndroidDesktopUp(linuxDir, { ready, viewerPort: viewer.port })).toBe(false);
 
       viewer.close();

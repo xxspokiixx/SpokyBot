@@ -33,6 +33,21 @@ describe("VPS SSH connection sharing supplied by the app", () => {
       expect(config).toContain(line);
     }
   });
+  it("names the staged identities in the config every ssh consumer reads", () => {
+    const data = scratch();
+    mkdirSync(join(data, "ssh"), { recursive: true });
+    for (const name of ["id_ed25519", "id_rsa", "id_rsa.pub", "config"]) writeFileSync(join(data, "ssh", name), "k");
+    // The asset extractor restores only exec bits, so a key lands readable by everyone.
+    chmodSync(join(data, "ssh", "id_ed25519"), 0o644);
+    const setup = prepareVpsSsh(data, "/usr/bin", "android");
+    const config = readFileSync(setup.configPath!, "utf8");
+    expect(config).toContain(`  IdentityFile ${JSON.stringify(join(data, "ssh", "id_ed25519"))}`);
+    expect(config).toContain(`  IdentityFile ${JSON.stringify(join(data, "ssh", "id_rsa"))}`);
+    expect(config).not.toContain("id_rsa.pub");
+    // Windows has no POSIX modes to tighten.
+    if (process.platform !== "win32") expect(statSync(join(data, "ssh", "id_ed25519")).mode & 0o777).toBe(0o600);
+  });
+
   it("does nothing on Windows, where OpenSSH has no connection sharing", () => {
     const data = scratch();
     expect(prepareVpsSsh(data, "C:\\Windows\\System32", "win32")).toEqual({ configPath: null, path: "C:\\Windows\\System32" });
