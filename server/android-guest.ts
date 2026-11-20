@@ -99,3 +99,43 @@ export function guestCommandFor(guest: AndroidGuestConfig, cli: string, args: st
     },
   };
 }
+
+/** The path a wrapped engine must use for a host folder.
+ *
+ *  guestCommandFor binds the app's data dir at /data and the linux dir at /host-linux, so a guest
+ *  process cannot see the host path the server hands it: OpenCode was told to work in
+ *  /data/user/0/<pkg>/files/data/task-workspaces/… and answered NotFound, failing every turn. A
+ *  folder outside those mounts is refused rather than passed through, because the guest would
+ *  work somewhere else without saying so.
+ *
+ *  Returns the input unchanged off the phone, so every desktop path stays exactly as it was. */
+export function guestWorkspacePath(path: string, env: NodeJS.ProcessEnv = process.env): string {
+  const guest = androidGuest(env);
+  if (!guest) return path;
+  for (const [host, inside] of guestMounts(guest)) {
+    const prefix = host.endsWith(sep) ? host : host + sep;
+    if (path === host) return inside;
+    if (path.startsWith(prefix)) return `${inside}/${path.slice(prefix.length).split(sep).join("/")}`;
+  }
+  return path;
+}
+
+/** The inverse of guestWorkspacePath: a path a guest engine names, as this computer has it.
+ *
+ *  The engine asks the client to read and write files by the only names it knows, which are the
+ *  guest's; the server opens them on the host. Off the phone this returns the input unchanged. */
+export function hostWorkspacePath(path: string, env: NodeJS.ProcessEnv = process.env): string {
+  const guest = androidGuest(env);
+  if (!guest) return path;
+  for (const [host, inside] of guestMounts(guest)) {
+    if (path === inside) return host;
+    if (path.startsWith(`${inside}/`)) return join(host, ...path.slice(inside.length + 1).split("/"));
+  }
+  return path;
+}
+
+function guestMounts(guest: AndroidGuestConfig): Array<[string, string]> {
+  const mounts: Array<[string, string]> = [[guest.linuxDir, "/host-linux"]];
+  if (guest.dataDir) mounts.push([guest.dataDir, "/data"]);
+  return mounts;
+}

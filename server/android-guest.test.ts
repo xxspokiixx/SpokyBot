@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { androidGuest, guestCommandFor, needsGuestLoader } from "./android-guest.ts";
+import { androidGuest, guestCommandFor, guestWorkspacePath, needsGuestLoader } from "./android-guest.ts";
 
 function phone() {
   const dir = mkdtempSync(join(tmpdir(), "omb-guest-"));
@@ -91,6 +91,32 @@ describe("a glibc engine on the phone", () => {
       expect(guest, "the phone is still recognised").not.toBeNull();
       expect(guest!.tmpDir).toBe(join(linux, "tmp"));
       expect(needsGuestLoader("opencode", env)).toBe(true);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe("the folder a guest engine is told to work in", () => {
+  it("names it by the mount the guest sees, not by the phone's own path", () => {
+    // OpenCode was handed /data/user/0/<pkg>/files/data/task-workspaces/x, answered NotFound, and
+    // every turn failed before its first model call.
+    const { env, dir } = phone();
+    try {
+      expect(guestWorkspacePath(join(dir, "data", "task-workspaces", "b", "t"), env)).toBe("/data/task-workspaces/b/t");
+      expect(guestWorkspacePath(join(dir, "data"), env)).toBe("/data");
+      expect(guestWorkspacePath(env.OMB_ANDROID_LINUX_DIR!, env)).toBe("/host-linux");
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it("leaves a desktop path alone, where there is no guest at all", () => {
+    const plain = { PATH: "/usr/bin" } as NodeJS.ProcessEnv;
+    expect(guestWorkspacePath("/home/someone/project", plain)).toBe("/home/someone/project");
+  });
+
+  it("leaves a path outside the mounts alone rather than inventing one", () => {
+    // Guessing would point the engine at a folder that is not the one the person meant.
+    const { env, dir } = phone();
+    try {
+      expect(guestWorkspacePath("/sdcard/Download", env)).toBe("/sdcard/Download");
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });

@@ -2,6 +2,7 @@ import { realpathSync } from "node:fs";
 import { isAbsolute } from "node:path";
 
 import { safetyFloorClears } from "../safety-floor-gate.ts";
+import { hostWorkspacePath } from "../android-guest.ts";
 
 /** Approval identity preserves every command byte, including whitespace and
  * newlines. Callers must supply native shell input, never a display preview. */
@@ -43,9 +44,10 @@ const DIRECTORY_KEYS = ["cwd", "Cwd", "workdir", "working_directory", "directory
 export function acpPermissionCommand(rawInput: unknown, launchCwd: string | undefined): ReturnType<typeof permissionCommand> {
   if (!rawInput || typeof rawInput !== "object" || Array.isArray(rawInput)) return undefined;
   const input = rawInput as Record<string, unknown>;
+  // A guest engine names its folder the way its own mount sees it; this computer compares them by host paths.
   const directories = DIRECTORY_KEYS
     .filter((key) => input[key] !== undefined)
-    .map((key) => input[key]);
+    .map((key) => (typeof input[key] === "string" ? hostWorkspacePath(input[key] as string) : input[key]));
   if (directories.some((value) => typeof value !== "string" || !isAbsolute(value) || value.includes("\0"))) return undefined;
   if (new Set(directories).size > 1) return undefined;
   // Two different spellings of the command are a contradiction, not a choice.
