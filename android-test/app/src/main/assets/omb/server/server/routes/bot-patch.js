@@ -10,6 +10,7 @@ import { parseBotProfilePatch } from "../bot-profile.js";
 import { accessFromVisibility } from "../../shared/bot-access.js";
 import { parseVisibility } from "../bot-visibility.js";
 import { cloudBackendChangeError, vpsBotAliasChangeError, vpsLeftBehindNotice, VPS_BOT_ALIAS_CHANGE_ERROR, VPS_BOT_ALIAS_LIFECYCLE_ERROR, VPS_BOT_ALIAS_RESOURCES_ERROR } from "../cloud-backend.js";
+import { dropRemovedGrants, MAX_ALWAYS_ALLOW } from "../always-allow.js";
 import * as composio from "../composio.js";
 import { isValidVpsSshTarget } from "../config.js";
 import { MAX_MCP_SERVERS, mcpServerNameError } from "../mcp-registry.js";
@@ -569,7 +570,11 @@ export function createBotPatchRoutes(deps) {
                 if (!Array.isArray(body.alwaysAllow) || body.alwaysAllow.some((t) => typeof t !== "string")) {
                     return json(res, 400, { error: "alwaysAllow must be a list of tool keys" });
                 }
-                patch.alwaysAllow = [...new Set(body.alwaysAllow)].slice(0, 200);
+                const keys = [...new Set(body.alwaysAllow)];
+                if (keys.length > MAX_ALWAYS_ALLOW) {
+                    return json(res, 400, { error: `A bot remembers at most ${MAX_ALWAYS_ALLOW} standing grants; this list has ${keys.length}.` });
+                }
+                patch.alwaysAllow = keys;
             }
             // Known gap: outside the packaged desktop, loopback is the owner, so these loosenings are one curl from
             // the bot they constrain. An originless, session-less loopback caller may loosen only while every bot is idle.
@@ -714,6 +719,10 @@ export function createBotPatchRoutes(deps) {
             }
             if (!bot)
                 return json(res, 404, { error: "no such bot" });
+            // The person edits the bot's list in Settings, so a grant they took off leaves every thread and running turn of the
+            // bot in the same save: no thread may keep allowing what Settings no longer shows.
+            if (Array.isArray(patch.alwaysAllow))
+                dropRemovedGrants(store, deps.turnBots?.values() ?? [], m[1], patch.alwaysAllow);
             if (body.applyToAllThreads === true && requestedApprovalMode !== "custom")
                 store.setAllThreadApprovalMode(bot.id, requestedApprovalMode);
             if (body.memoryUpkeep === false || body.memoryEnabled === false)

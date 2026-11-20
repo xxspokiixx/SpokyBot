@@ -3,6 +3,7 @@ import { findCliCandidates } from "../env-path.js";
 import { installNpmEngine, npmAvailable, serverInstallFor, standaloneLookupPath } from "../engine-install.js";
 import { installStandaloneEngine, isAppStandaloneCopy } from "../engine-standalone.js";
 import { withEngineMemory } from "../engine-memory.js";
+import { withTurnScope } from "../crash-guard.js";
 import { withEngineHomes } from "../engine-homes/engine-homes.js";
 import { withLocalContext } from "../drivers/local-inject.js";
 import { engineStatusFile, snapshotFrom } from "./engine-status-file.js";
@@ -128,13 +129,13 @@ export class ProviderRegistry {
             const rawCli = cliOfRaw(entry.config);
             if (rawCli)
                 this.cliByInstance.set(instanceId, rawCli);
-            const live = withLocalContext(withUnaskedStops(withEngineHomes(withEngineMemory(await driver.create({
+            const live = withLocalContext(withUnaskedStops(withEngineHomes(withEngineMemory(withTurnScope(await driver.create({
                 instanceId,
                 displayName: entry.displayName ?? driver.metadata.displayName,
                 environment: entry.environment ?? {},
                 enabled: entry.enabled ?? true,
                 config,
-            })))));
+            }))))));
             this.shareSnapshot(live);
             return { instanceId, live: decorate ? decorate(live) : live };
         }

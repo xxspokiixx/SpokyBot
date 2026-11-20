@@ -10,6 +10,7 @@ import { writeFileAtomic } from "./atomic.js";
 import { anthropicKeyEnv } from "./anthropic-key-env.js";
 import { withoutComputerEngine } from "./computer-engine-removal.js";
 import { newBotDefaultsSchema } from "./new-bot-defaults.js";
+import { defaultBotThreads } from "./bot-thread-limits.js";
 import { replaySettings } from "./replay-settings.js";
 import { EFFORT_LEVELS } from "../shared/wire.js";
 import { isModelVariant } from "./contracts.js";
@@ -43,7 +44,7 @@ export const MAX_ROOM_TURN_TIMEOUT_MINUTES = 1_440;
 export const DEFAULT_MCP_CALL_TIMEOUT_MINUTES = 10;
 export const MIN_MCP_CALL_TIMEOUT_MINUTES = 1;
 export const MAX_MCP_CALL_TIMEOUT_MINUTES = 60;
-export const DEFAULT_MAX_CONCURRENT_BOT_THREADS = 3;
+/** The most threads one bot may run at once, whatever it saved. */
 export const MAX_CONCURRENT_BOT_THREADS = 16;
 /** The floor keeps a log tail large enough for the event inspector's recent-line window. */
 export const MIN_THREAD_EVENT_LOG_BYTES = 256 * 1024;
@@ -549,7 +550,9 @@ export function cacheKeepWarmSettings(cfg) {
     return { enabled: cfg.cacheKeepWarm?.enabled === true, windowMinutes: cfg.cacheKeepWarm?.windowMinutes ?? DEFAULT_WINDOW_MINUTES };
 }
 export function maxConcurrentBotThreads(cfg) {
-    return cfg.threads?.maxConcurrentPerBot ?? DEFAULT_MAX_CONCURRENT_BOT_THREADS;
+    // A saved number wins, and so does the memory gate on a Cloud home. Otherwise the default follows the machine: three
+    // parallel engines on a 3.8 GB phone is what makes the kernel stop one.
+    return cfg.threads?.maxConcurrentPerBot ?? defaultBotThreads();
 }
 export function threadEventLogMaxBytes(cfg) {
     const cap = cfg.threads?.eventLogMaxBytes;
@@ -864,7 +867,7 @@ export function saveConfig(patch, options = {}) {
         const current = jsonObjectSchema.safeParse(disk[key]);
         const merged = current.success ? { ...current.data } : {};
         if (key === "threads" && !current.success)
-            merged.maxConcurrentPerBot = DEFAULT_MAX_CONCURRENT_BOT_THREADS;
+            merged.maxConcurrentPerBot = defaultBotThreads();
         Object.assign(merged, section);
         for (const [sectionKey, sectionValue] of Object.entries(section)) {
             if (sectionValue === null)

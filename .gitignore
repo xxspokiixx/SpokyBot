@@ -42,3 +42,6 @@ deploy/podman/.env.*
 /.env
 
 openmausbot-test-debug.apk
+
+# Downloaded by android-test/prepare-android-assets.mjs at build time (201 MB).
+android-test/app/src/main/assets/omb/linux/opencode

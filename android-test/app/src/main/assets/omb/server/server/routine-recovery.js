@@ -2,6 +2,7 @@ import { engineFailureKind } from "./drivers/engine-errors.js";
 import { classifyError } from "./drivers/retry.js";
 import { hostTimeZone } from "./turn-clock.js";
 import { classifyContinuable } from "./turn-continuation.js";
+import { namesOwnCause, outOfProcesses } from "./process-shortage.js";
 const RETRY_MS = 15_000;
 const RATE_LIMIT_RETRY_MS = 60_000;
 export const ROUTINE_BUSY_RECHECK_MS = 30_000;
@@ -46,6 +47,10 @@ export function classifyRoutineFailure(failure, facts = {}) {
         return { kind: "final" };
     if (facts.stalled)
         return { kind: "retry", cause: "stalled" };
+    // A spawn the machine refused is this server's shortage, not the AI's: retrying it on another model sends the person's
+    // work to a provider that will fail the same way.
+    if (outOfProcesses(failure) && !namesOwnCause(failure))
+        return { kind: "final" };
     const engine = engineFailureKind(failure);
     const { reason, transient } = classifyError({ text: failure });
     if (facts.trialCredit || (engine === "credits" && !facts.limit))

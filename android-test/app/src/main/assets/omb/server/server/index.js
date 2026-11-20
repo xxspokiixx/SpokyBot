@@ -219,6 +219,7 @@ import { settleCloudHome } from "./cloud-home-settle.js";
 import { CLOUD_OUTSIDE_KEY, outsideDriven } from "./cloud-sharing.js";
 import { createCloudMoveRoutes } from "./cloud-move-http.js";
 import { RESTART_EXIT_CODE } from "./restart.js";
+import { installCrashGuard } from "./crash-guard.js";
 import { applyIncludedXMessage, holdIncludedServices, researchCredential, trialCreditCredential, xCredential, xResearchStatus } from "./included-services.js";
 import { createResearchAvailability } from "./research.js";
 import { CloudCreditProvider } from "./cloud-credit-provider.js";
@@ -395,6 +396,9 @@ import { createGracefulShutdown } from "./graceful-shutdown.js";
 import { acquireDataDirLeaseForProcess } from "./data-dir-lease.js";
 import { createWorkspaceAccess, describeEdition, editionForSettings, editionStatus, entitled, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, licenseWarning, sharedWorkspaceFullAccessConfigured, loadEnterpriseLayer, workspaceMembership } from "./enterprise.js";
 import { environmentDescriptor, loadEnvironmentId, serverVersion } from "./environment.js";
+import { dataFormatAtStart } from "./data-format.js";
+import { doctorAtStart, doctorSummary } from "./doctor/start.js";
+import { ModelManifestStore } from "./model-manifest/manifest.js";
 import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.js";
 import { createWorkspaceBackupRoutes, isWorkspaceBackupSessionControl } from "./workspace-backup-http.js";
 import { applyPendingWorkspaceRestore, readLastWorkspaceRestore } from "./workspace-backup.js";
@@ -434,6 +438,13 @@ import { createBotMemoryRoutes } from "./routes/bot-memory.js";
 import { createBotCreateRoutes } from "./routes/bots-create.js";
 import { createTeamOwnerRoutes } from "./routes/team-owners.js";
 import { createBotSettingsRoutes } from "./routes/bot-settings.js";
+import { createDoctorRoutes } from "./routes/doctor.js";
+import { announcementRoutes } from "./routes/announcements.js";
+import { createCheckBacks } from "./host/check-backs.js";
+import { writeCheckBackLine } from "./host/check-back-host.js";
+import { checkBackRefusal, createCheckBackRoutes, createCheckBackToolRoutes } from "./routes/check-backs.js";
+import { createPhoneHoldRoutes } from "./routes/phone-hold.js";
+import { createPhoneHold, PHONE_HOLD_WAIT_MS } from "./phone-hold.js";
 import { createBotPatchRoutes } from "./routes/bot-patch.js";
 import { createBotOrderRoutes } from "./routes/bot-order.js";
 import { createBotLifecycleRoutes } from "./routes/bot-lifecycle.js";
@@ -515,21 +526,25 @@ function hostComputerConnection() {
     }
     return desktopComputer.connection();
 }
-// Crash diagnostics: log, then exit non-zero so a supervisor (Electron, the Android shell, systemd)
-// sees the failure. A synchronous throw during boot aborts module evaluation; without an explicit
-// exit the empty event loop would drain to code 0 and hide a fatal start (e.g. a held data-dir lease).
-process.on("unhandledRejection", (reason, promise) => {
-    console.error("[FATAL] Unhandled rejection at:", promise, "reason:", reason);
-    process.exit(1);
-});
-process.on("uncaughtException", (error) => {
+// Crash diagnostics before the guard exists: a synchronous throw during boot aborts module evaluation, and without an
+// explicit exit the empty event loop would drain to code 0 and hide a fatal start (e.g. a held data-dir lease). The
+// guard (server/crash-guard.ts) replaces these once the shutdown path and the watchdog exist, so every error after
+// boot is judged there instead.
+function onBootException(error) {
     console.error("[FATAL] Uncaught exception:", error);
     process.exit(1);
-});
+}
+function onBootRejection(reason, promise) {
+    console.error("[FATAL] Unhandled rejection at:", promise, "reason:", reason);
+    process.exit(1);
+}
+process.on("uncaughtException", onBootException);
+process.on("unhandledRejection", onBootRejection);
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
 const WEBHOOK_PUBLIC_URL = process.env.OMB_WEBHOOK_PUBLIC_URL || undefined;
 const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
+dataFormatAtStart("check", DATA_DIR, serverVersion());
 ensureDirs();
 // Acquire before any durable identity, sessions, config or Store state is loaded.
 const dataDirLease = acquireDataDirLeaseForProcess(DATA_DIR);
@@ -556,6 +571,8 @@ if (existsSync(join(DATA_DIR, ".backups"))) {
     if (!workspaceRestore.restored && !workspaceRestore.rolledBack)
         workspaceRestore = readLastWorkspaceRestore(DATA_DIR) ?? workspaceRestore;
 }
+dataFormatAtStart("stamp", DATA_DIR, serverVersion());
+doctorAtStart(DATA_DIR, serverVersion()); // the first start of a version: safe repairs, before anything reads the data
 const workspaceMaintenance = new WorkspaceBackupMaintenance(), moveFreeze = createMoveFreeze({ dataDir: DATA_DIR, exportOnly: (process.env.OMB_CLOUD_ROLE === "home" || process.env.OMB_CLOUD_ROLE === "team") && process.env.OMB_CLOUD_EXPORT_ONLY === "1" });
 // Only after ensureDirs(), whose one-time legacy data-dir rename must not find ~/.openmausbot already there.
 const ENVIRONMENT_ID = loadEnvironmentId(DATA_DIR);
@@ -1391,6 +1408,14 @@ function resyncOpenCodeProviderKeys() {
 }
 const firstEngineRead = holdUntilFirstEngineRead();
 await registry.load(providerConfigs(), decorateHostedProvider);
+// The model list that can change without a new APK: it only ever adds or retires a model the drivers already run, and a
+// phone that never reaches the network keeps the copy this build shipped with.
+const modelManifest = new ModelManifestStore({ dataDir: DATA_DIR });
+if (!modelManifest.fetchDisabled) {
+    modelManifest.refreshInBackground();
+    // A list that names a model this build did not ship changes the pickers, so a client hears about it.
+    modelManifest.onChange(() => broadcast({ kind: "config", ...configStatus() }));
+}
 const bundledSkills = loadBundledSkills();
 const availableSkills = () => mergeSkills(bundledSkills, loadUserSkills(join(DATA_DIR, "skills")));
 /** Every turn the engine can mount it, whatever its words: they pick only the skill's instructions. A Cloud home or a hosted workspace has no USB port. */
@@ -1761,6 +1786,8 @@ function internalCapabilityIsActive(capability) {
 const MAX_COMMS_DEPTH = 1;
 const MAX_WORKSPACE_BOTS = 100;
 const phoneProxyPath = SPAWNED_PROXIES.phone;
+/** A person's hold on the phone the bots use (features.usbPhoneTakeover): on, every bot's call waits for the hand-back. */
+const phoneHold = createPhoneHold();
 const researchAvailability = createResearchAvailability({ credential: () => researchCredential(cfg.treg?.key) });
 researchAvailability.available();
 function agentsIntegration(botId, threadId, depth, skillAuthoring, generation, roomHandoffId, hostFiles = false) {
@@ -4967,7 +4994,7 @@ function stoppedTurnText(threadId, turnId, cause, stopReason) {
 const watchdog = new TurnWatchdog({
     stallMs: TURN_STALL_MS, toolStallMs: TOOL_STALL_MS,
     checkMs: 60_000,
-    onStall: (turn, silentMs) => {
+    onStall: (turn, silentMs, reason) => {
         const stalledResourceOwner = turnResourceOwners.get(turn.threadId);
         const stalledGeneration = directTurnGenerationByThread.get(turn.threadId);
         const stalledProviderTurn = directRequestOwners.get(turn.threadId);
@@ -4978,10 +5005,15 @@ const watchdog = new TurnWatchdog({
         const bot = botForThread(turn.botId, turn.threadId);
         const routineRun = activeRoutineRunForThread(turn.threadId);
         void runningTurnInstance(bot, turn.threadId)?.adapter.interruptTurn(turn.threadId).catch(() => { });
-        const minutes = Math.round(silentMs / 60_000), cause = engineMemory.stallCause(turn.threadId, `no activity for ${minutes} minutes — the turn was stopped`);
+        const minutes = Math.round(silentMs / 60_000);
+        const cause = reason === "server-error"
+            ? engineMemory.stallCause(turn.threadId, "an unexpected error in the server stopped this turn (details in the server log)")
+            : engineMemory.stallCause(turn.threadId, `no activity for ${minutes} minutes — the turn was stopped`);
         const stalled = stoppedTurnText(turn.threadId, liveTurnByThread.get(turn.threadId), cause);
         if (routineRun?.target === "bot") {
-            routines?.failThread(turn.threadId, engineMemory.stallCause(turn.threadId, `No activity for ${minutes} minutes — the routine was stopped`), { cause: "stalled" });
+            routines?.failThread(turn.threadId, engineMemory.stallCause(turn.threadId, reason === "server-error"
+                ? "An unexpected error in the server stopped the routine (details in the server log)"
+                : `No activity for ${minutes} minutes — the routine was stopped`), { cause: "stalled" });
         }
         store.appendMessage(turn.threadId, {
             role: "bot",
@@ -9115,6 +9147,20 @@ calendarCalls = new CalendarCallManager({
 const botWaits = new WaitManager(createWaitHost({ store, directChat: directChatOf, threadBusy, wrote: markTaskContextExternallyUpdated, notify, enqueue: (input) => routines.enqueueWebhook(input), cloudHome: Boolean(CLOUD_HOME) }));
 store.onChange((change) => { if (change.type === "bot" && store.bot(change.botId)?.busy)
     botWaits.noteBotBusy(change.botId); });
+// A bot's check_back: it comes back to the same conversation at a time it chose. The turn it starts is an ordinary one,
+// started for whoever's request set it, so on a Team Cloud the asker owns the run and a private chat stays private.
+const checkBacks = createCheckBacks({
+    dataDir: DATA_DIR,
+    alive: (botId, threadId) => Boolean(store.bot(botId) && store.taskByThread(botId, threadId)),
+    busy: (botId, threadId) => threadBusy(botId, threadId),
+    line: (record, line, messageId) => writeCheckBackLine(store, record, line, messageId, threadLanguage(record.threadId)),
+    start: async (record, prompt) => { await beginTurn(record.botId, prompt, { threadId: record.threadId, origin: record.origin, unattended: true }); },
+    paused: (error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        return /\bpaused\b|\bheld\b/i.test(message);
+    },
+    log: (text) => console.warn(text),
+});
 const recoveryOwners = routines.routineRequestReceiptOwners();
 if (recoveryOwners.length > 0) {
     const recoveryThreads = [...new Set(recoveryOwners.map((owner) => owner.threadId))];
@@ -12218,11 +12264,12 @@ const workspaceBackupAccess = {
             teamComputers.list().every(computer => !teamComputerInUse(computer)) &&
             store.bots.every((bot) => !botHasActiveTurn(bot.id) && !routines?.activeRunForBot(bot.id) && !botComputerControlSnapshot(bot.id).held) &&
             store.groups.every((group) => !groupIsWorking(group)),
-        pause: () => { routines?.stop(); calendarCalls?.stop(); botWaits.stop(); watchdog.stop(); memoryUpkeep.pause(); },
+        pause: () => { routines?.stop(); calendarCalls?.stop(); botWaits.stop(); checkBacks.stop(); watchdog.stop(); memoryUpkeep.pause(); },
         resume: () => { if (!moveFreeze.frozen()) {
             routines?.start();
             calendarCalls?.start();
             botWaits.start();
+            checkBacks.start();
         } watchdog.start(); memoryUpkeep.resume(); },
         flush: async () => {
             await Promise.all([flushAllProfileHistory(), flushAllMemoryJournals(), flushUsageLedger(DATA_DIR), flushDecisionLog(DATA_DIR), flushAdminActivity(DATA_DIR)]);
@@ -12302,7 +12349,7 @@ ROUTES.push(createBotSettingsRoutes({
 }));
 ROUTES.push(createBotOrderRoutes({ store, visibleFor: (auth) => visibleTo(viewerFor(auth)) }), createBotAccessRoutes({ team: CLOUD_TEAM, people: teamOwners.people, store, levelOf, wireBot, publicGroupState, broadcast, audienceChanged, record: (auth, row) => appendAdminAction(DATA_DIR, { ...row, actor: decisionActorFor(auth) }) }), accessRequests.routes);
 ROUTES.push(createBotPatchRoutes({
-    store, cfg, registry, sessions, browserRuntime, browserLive, memoryUpkeep, cacheKeepWarm, hostedModels, supportsApprovalMode,
+    store, turnBots: directTurnBots, cfg, registry, sessions, browserRuntime, browserLive, memoryUpkeep, cacheKeepWarm, hostedModels, supportsApprovalMode,
     routines: () => routines, activeVpsThreads,
     hostedWorkspace: HOSTED_WORKSPACE, hostedFullAccessRefusal: HOSTED_FULL_ACCESS_REFUSAL, desktopManaged: DESKTOP_MANAGED, maxWorkspaceBots: MAX_WORKSPACE_BOTS,
     broadcast, wireBot, publicGroupState, audienceChanged, storedAvatarExists, requestedTaskBot, threadBusy, activeGroupTurnForBot,
@@ -12316,6 +12363,14 @@ ROUTES.push(createBotLifecycleRoutes({
 ROUTES.push(createBotSkillsRoutes({ store, cfg, listBotSkills, readBotSkillFile, stagedSkillListing }));
 ROUTES.push(createHighLevelRoutes({ service: highlevel }));
 ROUTES.push(phones.routes);
+ROUTES.push(createDoctorRoutes({ dataDir: DATA_DIR, version: serverVersion, isAdmin: ownerOrAdmin }));
+ROUTES.push(createPhoneHoldRoutes({ hold: phoneHold, isAdmin: ownerOrAdmin }));
+ROUTES.push(announcementRoutes);
+ROUTES.push(createCheckBackRoutes({
+    checkBacks,
+    sees: (auth, threadId) => threadShown(auth)(threadId),
+    refusal: (auth, threadId, messageId) => cardAnswerRefusal(auth, threadId, messageId, "allow"),
+}));
 ROUTES.push(createSkillShareRoutes({ enabled: () => skillsHost.mode() !== "off", botExists: (id) => Boolean(store.bot(id)),
     cardRefusal: (auth, threadId, requestId) => cardAnswerRefusal(auth, threadId, requestId, "allow"), shareFromReceipt: skillsHost.shareFromReceipt, shareFromBot: skillsHost.shareFromBot }));
 ROUTES.push(createTeamContextRoutes({ store, teamMemory }));
@@ -12586,6 +12641,7 @@ ROUTES.push(createStatusRoutes({
     sharedWorkspaceFullAccessEnabled, adminActivityRecording, configStatus, broadcast, threadShown,
     browserEngineInstall: { get: () => browserEngineInstall, set: (install) => { browserEngineInstall = install; } },
     browserEngineInstallError: { set: (error) => { browserEngineInstallError = error; } },
+    doctor: doctorSummary,
 }));
 ROUTES.push(desktopViewer.route);
 ROUTES.push(createBrowserViewerRoutes({
@@ -13457,10 +13513,47 @@ const handleRequest = async (req, res) => {
             }
             if (method === "POST" && path === "/api/internal/phone/claim") {
                 requireActiveInternalCapability();
+                // A person holds the phone: the call is refused with a 423 and words for the bot, then it waits for the hand-back
+                // unless the body says `wait: false` (a call in the middle of a batch, which cannot wait).
+                if (phoneHold.held) {
+                    const body = await readInternalBody().catch(() => null);
+                    if (body?.wait === false)
+                        return json(res, 423, { error: "a person is holding the phone" });
+                    const outcome = await phoneHold.wait(AbortSignal.timeout(PHONE_HOLD_WAIT_MS), PHONE_HOLD_WAIT_MS);
+                    if (outcome !== "handed-back")
+                        return json(res, 423, { error: "a person is holding the phone" });
+                    if (!claimTurnResource(internalCapability, "computer:phone"))
+                        return json(res, 409, { error: "another thread is using the phone" });
+                    return json(res, 200, { claimed: true, waited: true });
+                }
                 if (!claimTurnResource(internalCapability, "computer:phone")) {
                     return json(res, 409, { error: "another thread is using the phone" });
                 }
                 return json(res, 200, { claimed: true });
+            }
+            // A bot's check_back: set, list or cancel. Who may: the person's own request behind this turn, in their one-to-one
+            // chat, which is the same rule a wait follows.
+            if (method === "POST" && path === "/api/internal/check-backs") {
+                return dispatchRoutes([createCheckBackToolRoutes({
+                        checkBacks,
+                        requireActive: () => requireActiveInternalCapability(),
+                        botId: () => internalCapability.botId,
+                        threadId: () => internalCapability.threadId,
+                        refusal: () => checkBackRefusal({
+                            owned: Boolean(directRequestOwners.get(internalCapability.threadId)),
+                            room: Boolean(store.groupByThread(internalCapability.threadId)),
+                            depth: internalCapability.depth ?? 0,
+                            // No stored mark for a hand-off on a task here: the origin and depth cover every case this fork has.
+                            handedOff: false,
+                            routineRun: Boolean(store.taskByThread(internalCapability.botId, internalCapability.threadId)?.routineRunId),
+                            outsideDriven: directRequestOwners.get(internalCapability.threadId)?.origin?.kind === "outside",
+                            personStarted: directRequestOwners.get(internalCapability.threadId)?.origin?.kind === "user",
+                            guest: false,
+                        }),
+                        zone: () => hostTimeZone(),
+                        origin: () => directRequestOwners.get(internalCapability.threadId)?.origin ?? OUTSIDE,
+                        readBody: () => readInternalBody(),
+                    })], { req, res, url, path, method, auth, json, readBody });
             }
             // Off: a 404 like a route that never existed. On: a turn sees only the computers of the person it provably acts for.
             if (method === "GET" && path === "/api/internal/shared-computers" && lendingEnabled()) {
@@ -16000,7 +16093,7 @@ server.listen(PORT, "127.0.0.1", async () => {
             return;
     }
     // Only once every registry is initialized and the endpoint listens: earlier dispatch can hit uninitialized bindings.
-    moveFreeze.hold(() => { routines.start(); botWaits.start(); proactive.start(); }, () => { routines.stop(); botWaits.stop(); proactive.stop(); });
+    moveFreeze.hold(() => { routines.start(); botWaits.start(); checkBacks.start(); proactive.start(); }, () => { routines.stop(); botWaits.stop(); checkBacks.stop(); proactive.stop(); });
     limitClock.start();
     moveFreeze.hold(() => memoryUpkeep.start(), () => memoryUpkeep.stop());
 });
@@ -16054,6 +16147,8 @@ const gracefulShutdown = createGracefulShutdown({
             deviceLinks.close();
             stopCloudTeamPolicy();
             phones.close();
+            phoneHold.stop();
+            checkBacks.stop();
             sharedComputerControl.close();
             browserLive.closeAll();
             desktopViewer.closeAll();
@@ -16122,6 +16217,27 @@ const gracefulShutdown = createGracefulShutdown({
         });
     },
 });
+// From here on every error nothing caught is judged, so a bad callback stops only its own turn instead of ending the
+// server and every turn in flight with it.
+process.off("uncaughtException", onBootException);
+process.off("unhandledRejection", onBootRejection);
+installCrashGuard({
+    failTurn: (turn) => watchdog.fail(turn.threadId),
+    redact: redactSecretsInText,
+    log: (line) => console.error(line),
+    shutdown: (code) => {
+        // Fatal: no flush of what memory holds (ledgers, journals, sessions, bus, registries); running turns stay "running"
+        // in the runtime store, so the next start reruns them. Engines are stopped so none is orphaned.
+        companyShutdown = true;
+        try {
+            noteTurnsCutByShutdown();
+        }
+        catch { /* best effort */ }
+        void Promise.race([registry.disposeAll(), new Promise((done) => setTimeout(done, 5_000))])
+            .catch(() => { })
+            .finally(() => { releaseDataDirLeaseAtExit(); process.exit(code); });
+    },
+});
 for (const signal of ["SIGINT", "SIGTERM"]) {
-    process.on(signal, gracefulShutdown);
+    process.on(signal, () => gracefulShutdown());
 }

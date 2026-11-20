@@ -25,7 +25,7 @@ import { appendAdminAction, flushAdminActivity, sharedSignIn } from "./admin-act
 import { bindDecisionRetention, decisionRetentionDays } from "./decision-log.js";
 import { hostedWorkspaceConfigured } from "./enterprise.js";
 import { resolveLoopbackTrust } from "./request-auth.js";
-import { restartPolicy } from "./restart.js";
+import { restartLine, restartPolicy } from "./restart.js";
 import { writeFileAtomic } from "./atomic.js";
 import { ensureCaddy, normalizeDomainOption, startCaddy } from "./caddy.js";
 import { runServiceCommand } from "./service-cli.js";
@@ -963,7 +963,8 @@ export async function runServe(options, log = console.log) {
         process.removeListener("SIGTERM", onSignal);
     }
 }
-/** A server exiting with RESTART_EXIT_CODE is started again here at the same address, without a second pairing code. */
+/** A server exiting with RESTART_EXIT_CODE, or after a crash, is started again here at the same address, without a
+ * second pairing code; a crash waits longer each time, and both counts stop the launcher after their limit. */
 export async function serveUntilStopped(options, run = runServe, now = Date.now) {
     const policy = restartPolicy(now);
     let launch = options;
@@ -971,7 +972,10 @@ export async function serveUntilStopped(options, run = runServe, now = Date.now)
         const code = await run(launch);
         if (!policy.again(code))
             return code;
-        console.log("\nSpokyBot is starting again to finish installing a copy from the desktop app…");
+        const delay = policy.delayMs();
+        console.log(restartLine(code, delay));
+        if (delay)
+            await new Promise((done) => setTimeout(done, delay));
         launch = { ...options, pair: false, open: false };
     }
 }

@@ -1,14 +1,11 @@
 // Stdio bridge to the Cua MCP server in a VPS container; auth is the user's SSH config and agent, and nothing is stored here.
 import { runMcpBridge } from "./mcp-bridge.js";
-import { vpsContainerMcpArgs, vpsDockerArgs } from "./vps-computer.js";
-import { DATA_DIR } from "./config.js";
-import { augmentedPath } from "./env-path.js";
-import { prepareVpsSsh } from "./vps-ssh.js";
+import { vpsContainerMcpLaunch } from "./vps-computer.js";
 const [alias, containerName] = process.argv.slice(2);
 const sshAlias = alias ?? "";
-let args;
+let launch;
 try {
-    args = vpsContainerMcpArgs(sshAlias, containerName ?? "");
+    launch = await vpsContainerMcpLaunch(sshAlias, containerName ?? "");
 }
 catch {
     process.stderr.write("invalid VPS MCP connection\n");
@@ -17,13 +14,11 @@ catch {
 // The driving pair rides in env, not argv: argv is world-readable through `ps`.
 const controlUrl = process.env.OMB_CONTROL_URL ?? "";
 const controlToken = process.env.OMB_CONTROL_TOKEN ?? "";
-const ssh = prepareVpsSsh(DATA_DIR, augmentedPath());
 runMcpBridge({
-    command: "docker",
-    args,
-    env: { ...process.env, PATH: ssh.path },
+    command: launch.command,
+    args: launch.args,
+    env: launch.env,
     label: "VPS Cua Driver",
-    // Probe the transport, not the driver: a busy desktop mid-tool-call must never look dead.
-    liveness: { command: "docker", args: vpsDockerArgs(sshAlias, ["version", "--format", "{{.Server.Version}}"]) },
+    liveness: launch.liveness,
     ...(controlUrl && controlToken ? { gate: { url: controlUrl, token: controlToken } } : {}),
 });

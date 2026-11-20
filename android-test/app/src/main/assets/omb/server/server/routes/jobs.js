@@ -75,6 +75,9 @@ export function createJobRoutes(deps) {
             return json(res, 200, view);
         const held = await new Promise((answer) => {
             let settleTimer;
+            // finish() clears these, and it is declared before either is assigned.
+            let deadline;
+            let recheck;
             let done = false;
             const finish = (next) => {
                 if (done)
@@ -105,8 +108,8 @@ export function createJobRoutes(deps) {
                 clearTimeout(settleTimer);
                 settleTimer = setTimeout(() => look(false), SETTLE_MS);
             });
-            const recheck = setInterval(() => look(false), deps.recheckMs ?? RECHECK_MS);
-            const deadline = setTimeout(() => look(true), wait);
+            recheck = setInterval(() => look(false), deps.recheckMs ?? RECHECK_MS);
+            deadline = setTimeout(() => look(true), wait);
             res.on("close", abandoned);
         });
         if (res.writableEnded || res.destroyed)

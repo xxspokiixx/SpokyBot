@@ -14,6 +14,7 @@ import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.j
 import { callHelperTool, HELPER_TOOL_NAMES } from "./agents-helper-tools.js";
 import { callUsageLimitsTool, USAGE_LIMITS_TOOL } from "./agents-usage-tool.js";
 import { callWaitTool, WAIT_TOOL_NAMES } from "./agents-wait-tools.js";
+import { callCheckBackTool, CHECK_BACK_TOOL_NAMES } from "./agents-check-back-tool.js";
 import { callComputerAskTool, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.js";
 import { callSpokyBotTool, MAUSBOT_TOOL_NAMES } from "./agents-mausbot-tools.js";
 import { callPageTool, PAGE_TOOL_NAMES } from "./agents-pages-tools.js";
@@ -212,6 +213,8 @@ export async function callTool(called, input, context) {
         return callTriggerTool(name, args, context);
     if (WAIT_TOOL_NAMES.has(name))
         return callWaitTool(name, args, context);
+    if (CHECK_BACK_TOOL_NAMES.has(name))
+        return callCheckBackTool(args, context);
     if (name === USAGE_LIMITS_TOOL)
         return callUsageLimitsTool(context);
     if (COMPUTER_ASK_TOOL_NAMES.has(name))

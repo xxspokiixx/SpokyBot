@@ -194,7 +194,8 @@ async function callTool(name, args) {
         continue;
       }
       try {
-        const result = await callTool(action, { ...step, serial: args.serial });
+        // `...step` first: it carries `action`, which must not overwrite the service's own action name.
+        const result = await callTool(action, { ...step, action: undefined, serial: args.serial });
         done.push(stepLine(action, result));
         if (action === "read_screen") screen = result;
       } catch (error) {
@@ -208,7 +209,9 @@ async function callTool(name, args) {
   if (!claim.ok) return textResult(claim.message, true);
   const action = ACTION_FOR[name];
   if (!action) throw new Error(`Unknown phone tool: ${name}`);
-  const answer = await askService({ action, ...args });
+  // The tool's own fields, then the service's action last: a step's `action` must never replace it.
+  const { serial: _serial, ...fields } = args ?? {};
+  const answer = await askService({ ...fields, action });
   if (!answer.ok) return textResult(String(answer.error ?? "the call failed"), true);
   if (name === "read_screen") return textResult(nodeLines(answer.nodes ?? []));
   if (name === "list_apps") return textResult((answer.apps ?? []).join("\n") || "No matching launchable app found");
@@ -250,10 +253,39 @@ process.stdin.on("data", (chunk) => {
     if (line) handle(line);
   }
 });
-process.stdin.on("end", () => process.exit(0));
+// A caller may close stdin right after its last call, and its last message may arrive without a closing newline: read
+// what is left, then wait for the replies it is still owed before leaving.
+process.stdin.on("end", () => {
+  if (buffer.trim()) {
+    handle(buffer.trim());
+    buffer = "";
+  }
+  const wait = () => (pending ? setTimeout(wait, 50) : process.exit(0));
+  wait();
+});
+
+/** Calls in flight: a closed stdin must not cut a reply the caller is still waiting for. */
+let pending = 0;
 
 function send(message) {
   process.stdout.write(JSON.stringify(message) + "\n");
+}
+
+/**
+ * One tools/call, with its claim; the reply is sent here so the end of stdin can wait for it. A claim refused (another
+ * thread holds the phone) is an answer, not a failure: it says so and nothing was performed.
+ */
+async function runTool(message) {
+  const id = message.id;
+  pending++;
+  try {
+    const result = await callTool(String(message.params?.name ?? ""), message.params?.arguments ?? {});
+    send({ jsonrpc: "2.0", id, result });
+  } catch (error) {
+    send({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text: String(error?.message ?? error) }], isError: true } });
+  } finally {
+    pending--;
+  }
 }
 
 function handle(line) {
@@ -279,9 +311,7 @@ function handle(line) {
   if (method === "ping") return send({ jsonrpc: "2.0", id: message.id, result: {} });
   if (method === "tools/list") return send({ jsonrpc: "2.0", id: message.id, result: { tools: TOOLS } });
   if (method === "tools/call") {
-    callTool(String(params?.name ?? ""), params?.arguments ?? {})
-      .then((result) => send({ jsonrpc: "2.0", id: message.id, result }))
-      .catch((error) => send({ jsonrpc: "2.0", id: message.id, result: { content: [{ type: "text", text: String(error?.stack ?? error) }], isError: true } }));
+    void runTool(message);
     return;
   }
   if (method === "resources/list" || method === "prompts/list") {

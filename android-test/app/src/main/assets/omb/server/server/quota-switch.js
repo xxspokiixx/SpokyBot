@@ -5,6 +5,7 @@ import { approvalModeFor, modelSwitchNeedsAsk } from "../shared/approval-mode.js
 import { recoveryCapabilityError } from "./automatic-recovery.js";
 import { readyToRun, selectDefaultModelSelection } from "./default-model-selection.js";
 import { classifyError } from "./drivers/retry.js";
+import { outOfProcesses } from "./process-shortage.js";
 import { PROBE_TIMEOUT_MS } from "./engine-install.js";
 import { spokenLineFields } from "./live-call-record.js";
 import { signedOutStop } from "./host/limit-takeover.js";
@@ -147,7 +148,9 @@ export function createQuotaSwitch(deps) {
             const cause = deps.turnStops.failureCause(event);
             // A tool call's failure names the tool, never the engine's own limit, whatever its words.
             const scope = signedOutStop(event.stopReason, cause) ? "signed-out"
-                : flags?.limit ?? (event.stopReason !== "tool_error" && classifyError({ text: cause ?? "" }).reason === "quota" ? "engine" : undefined);
+                // A spawn the machine refused is nobody's limit: moving the work to another engine would fail the same way there.
+                : outOfProcesses(cause ?? "") ? undefined
+                    : flags?.limit ?? (event.stopReason !== "tool_error" && classifyError({ text: cause ?? "" }).reason === "quota" ? "engine" : undefined);
             if (!scope)
                 return null;
             const thread = store.projectBotForTask(bot.id, threadId) ?? bot;

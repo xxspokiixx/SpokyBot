@@ -91,7 +91,16 @@ export class TurnWatchdog {
             if (at - turn.lastEventAt < silentMs)
                 continue;
             this.turns.delete(turn.threadId);
-            this.opts.onStall(turn, silentMs);
+            this.opts.onStall(turn, silentMs, "silent");
         }
+    }
+    /** Stops a watched turn now, as a stall would (server/crash-guard.ts: an error in the turn's own work). */
+    fail(threadId, reason = "server-error") {
+        const turn = this.turns.get(threadId);
+        if (!turn)
+            return false;
+        this.turns.delete(threadId);
+        this.opts.onStall(turn, this.now() - turn.lastEventAt, reason);
+        return true;
     }
 }

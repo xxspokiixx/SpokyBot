@@ -1,10 +1,10 @@
 // Cua-backed Local VM: OMB owns only the sandbox boundary; desktop automation is Cua Driver's (`cua-driver mcp` in the container).
 import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { lstatSync } from "node:fs";
+import { chmodSync, copyFileSync, lstatSync, mkdirSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { augmentedPath, resolveCliSpawn } from "./env-path.js";
 import { workspacePreparationDockerfile } from "./container-workspace.js";
@@ -288,7 +288,7 @@ function existingContainerProblem(status) {
     if (!status.imageMatches)
         return "The existing Local VM uses an older desktop or Cua Driver; recreate it";
     if (!status.managed)
-        return "The existing container was not created by OpenMausBot; recreate it";
+        return "The existing container was not created by SpokyBot; recreate it";
     if (status.network === "unsafe")
         return "The existing Local VM exposes its viewer publicly; recreate it";
     if (status.security === "unsafe")
@@ -363,6 +363,10 @@ export function cuaExecArgs(args, options = {}) {
     ];
 }
 export async function containerComputerStatus(runner = sh, platform = process.platform, target = SHARED_LOCAL_VM_TARGET, options = {}) {
+    // proot is the phone's own runtime: it is not on PATH (it lives in the app's data directory),
+    // so the docker/podman probe can never find it and every caller must not ask for it.
+    if (platform === "android")
+        return androidProotStatus();
     const status = emptyStatus(platform, target);
     const runtimeStatus = await containerRuntimeStatus(runner, platform);
     status.available = runtimeStatus.available;
@@ -670,7 +674,7 @@ export async function containerComputerAction(action, runner = sh, platform = pr
     if (action === "remove" && before.container === "missing")
         return before;
     if (action === "remove" && !before.managed) {
-        throw Object.assign(new Error(`The existing container named ${target.containerName} was not created by OpenMausBot; remove it manually in ${runtime}`), { status: 409 });
+        throw Object.assign(new Error(`The existing container named ${target.containerName} was not created by SpokyBot; remove it manually in ${runtime}`), { status: 409 });
     }
     if (action === "pull") {
         await prepareManagedImage(runtime, runner);
@@ -727,6 +731,21 @@ export async function containerComputerFrame(runner = sh, platform = process.pla
     }
     if (cacheable)
         screenshotStatusCache.set(target.key, { status, expiresAt: now + SCREENSHOT_STATUS_TTL_MS });
+    // The phone's desktop is read like any other X display: x11vnc already holds the framebuffer, so the
+    // screenshot comes from the guest's own tools rather than from a Cua socket this guest does not run.
+    // `proot` is the runtime this payload reports on a phone, and it is what tells the two apart: Node
+    // inside the APK reports process.platform "linux", the same as a desktop server.
+    if (status.runtime === "proot") {
+        try {
+            const png = await androidProotScreenshot();
+            return { png, format: "png" };
+        }
+        catch (error) {
+            if (cacheable)
+                screenshotStatusCache.delete(target.key);
+            throw error;
+        }
+    }
     try {
         const screenshot = "/tmp/openmausbot-preview.png";
         await runner(status.runtime, cuaExecArgs([
@@ -755,6 +774,47 @@ export async function containerComputerFrame(runner = sh, platform = process.pla
 export async function containerComputerScreenshot(runner = sh, platform = process.platform, target = SHARED_LOCAL_VM_TARGET) {
     const { png, format } = await containerComputerFrame(runner, platform, target);
     return `data:image/${format};base64,${png}`;
+}
+/**
+ * The phone's desktop as a PNG. Nothing in the guest can encode one, but `xwd` (from x11-apps) reads
+ * the X framebuffer and python3 ships zlib, which together are all PNG needs. The conversion script
+ * is staged next to the start script, so a re-extracted rootfs gets it again.
+ */
+async function androidProotScreenshot() {
+    const resolved = resolveAndroidProotConfig();
+    if (!resolved.ok)
+        throw Object.assign(new Error(resolved.problem), { status: 409 });
+    const { config } = resolved;
+    const { spawn } = await import("node:child_process");
+    const pngPath = join(config.tmpDir, "openmausbot-shot.png");
+    const captured = await new Promise((resolveShot, rejectShot) => {
+        const child = spawn(config.prootPath, androidProotArgs(config, ["/bin/dash", "-c",
+            "export DISPLAY=:1; rm -f /tmp/openmausbot-shot.xwd /tmp/openmausbot-shot.png; " +
+                "xwd -root -silent -out /tmp/openmausbot-shot.xwd && " +
+                "python3 /tmp/xwd-to-png.py /tmp/openmausbot-shot.xwd /tmp/openmausbot-shot.png"], { fakeRoot: true, workDir: "/root" }), { env: androidProotEnv(config), stdio: ["ignore", "pipe", "pipe"] });
+        let out = "";
+        child.stdout.on("data", (chunk) => { out += chunk.toString("utf8"); });
+        child.stderr.on("data", (chunk) => { out += chunk.toString("utf8"); });
+        const timer = setTimeout(() => { child.kill(); rejectShot(Object.assign(new Error("The desktop did not answer in time"), { status: 504 })); }, 30_000);
+        child.once("error", (error) => { clearTimeout(timer); rejectShot(error); });
+        child.once("close", () => {
+            clearTimeout(timer);
+            // The guest writes the frame under its own /tmp, which is the host's linux/tmp.
+            void (async () => {
+                try {
+                    const { readFileSync } = await import("node:fs");
+                    const png = readFileSync(pngPath);
+                    if (png.length < 8 || png.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a")
+                        throw new Error("not a png");
+                    resolveShot(png);
+                }
+                catch {
+                    rejectShot(Object.assign(new Error(`The desktop could not be captured${out.trim() ? `: ${out.trim().slice(0, 200)}` : ""}`), { status: 502 }));
+                }
+            })();
+        });
+    });
+    return captured.toString("base64");
 }
 const screenshotStatusCache = new Map();
 const containerMcpPath = SPAWNED_PROXIES.containerMcp;
@@ -892,7 +952,8 @@ const ANDROID_DESKTOP_READY = "desktop-ready";
 /** Exported for the readiness contract test: the desktop's own files and ports, not a fixed pair. */
 export async function isAndroidDesktopUp(linuxDir, files = {}) {
     const { existsSync, readFileSync } = await import("node:fs");
-    if (!existsSync(join(linuxDir, "tmp", ".X11-unix", "X3")))
+    // The phone's desktop runs on :1, the display its own start script creates; the socket name follows it.
+    if (!existsSync(join(linuxDir, "tmp", ".X11-unix", "X1")))
         return false;
     const ready = files.ready ?? join(linuxDir, "tmp", ANDROID_DESKTOP_READY);
     try {
@@ -904,6 +965,8 @@ export async function isAndroidDesktopUp(linuxDir, files = {}) {
         return false;
     }
     const net = await import("node:net");
+    // The desktop script binds the port this server publishes, so the readiness probe and the link a
+    // person is given name the same one.
     const viewerPort = files.viewerPort ?? 56082;
     return new Promise((resolvePort) => {
         const socket = net.createConnection({ host: "127.0.0.1", port: viewerPort });
@@ -920,7 +983,7 @@ export async function isAndroidDesktopUp(linuxDir, files = {}) {
 }
 async function stopAndroidDesktopProcesses(linuxDir) {
     const { readdirSync, readFileSync, unlinkSync } = await import("node:fs");
-    const desktopBinaries = /(?:Xvfb\s+:3|x11vnc|websockify.*56082|xfwm4|xfce4-panel|xfconfd|picom|dbus-daemon|jwm|openbox)/;
+    const desktopBinaries = /(?:Xvfb\s+:1|x11vnc|websockify.*56082|xfwm4|xfce4-panel|xfconfd|picom|dbus-daemon|jwm|openbox|xterm)/;
     try {
         for (const entry of readdirSync("/proc")) {
             const pid = Number(entry);
@@ -1020,20 +1083,56 @@ export async function androidProotAction(action) {
         await mkdir(config.tmpDir, { recursive: true });
         await mkdir(join(config.linuxDir, "tmp"), { recursive: true });
         await mkdir(config.workspace, { recursive: true });
+        // The launcher ships beside the rootfs, and is copied over the guest's own copy every start: the
+        // rootfs carries an older one that names the wrong display and port, and a fix there would never
+        // reach a phone that already has a rootfs extracted.
         const startScriptPath = join(config.rootfs, "usr", "local", "bin", "start-graphical-desktop");
+        const shippedLauncher = join(config.linuxDir, "start-graphical-desktop.sh");
+        if (existsSync(shippedLauncher)) {
+            try {
+                mkdirSync(dirname(startScriptPath), { recursive: true });
+                copyFileSync(shippedLauncher, startScriptPath);
+                chmodSync(startScriptPath, 0o755);
+            }
+            catch (error) {
+                console.warn(`[local-vm] could not install the desktop launcher: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }
+        // The screenshot converter rides beside the launcher for the same reason: a phone whose rootfs is
+        // already extracted never sees a change packed into the archive.
+        const shippedConverter = join(config.linuxDir, "xwd-to-png.py");
+        if (existsSync(shippedConverter)) {
+            try {
+                copyFileSync(shippedConverter, join(config.linuxDir, "tmp", "xwd-to-png.py"));
+            }
+            catch (error) {
+                console.warn(`[local-vm] could not install the screenshot converter: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }
+        /**
+         * The setup repairs what the archive never carried (its core programs are self-referential links).
+         * It used to run only when a desktop binary was absent, which is not the condition that matters: a
+         * rootfs can extract whole and still have no working `sh`.
+         */
+        const setupDoneMarker = join(config.linuxDir, "tmp", "setup-done");
         // A freshly extracted rootfs already carries the launcher scripts from an earlier build,
         // so their presence says nothing about the packages. Setup runs whenever the desktop's own
         // binaries are absent: without them the start script falls back to a bare openbox with no
         // terminal and no wallpaper, and the .deb payload is never unpacked.
         const desktopPacked = existsSync(join(config.rootfs, "usr", "bin", "xfce4-panel"))
             || existsSync(join(config.rootfs, "usr", "bin", "jwm"));
-        if (action === "pull" || !existsSync(startScriptPath) || !desktopPacked) {
+        // `/bin/dash`, not `/bin/bash`: the archive's bash is one of the programs this setup repairs, so
+        // asking for it here would be asking a broken program to fix itself.
+        if (action === "pull" || !existsSync(startScriptPath) || !desktopPacked || !existsSync(setupDoneMarker)) {
             const setupScript = join(config.linuxDir, "setup-graphical-desktop.sh");
             if (!existsSync(setupScript)) {
                 throw Object.assign(new Error("setup-graphical-desktop.sh not found in Android linux payload"), { status: 409 });
             }
             const setupResult = await new Promise((resolveSetup) => {
-                const child = spawn(config.prootPath, androidProotArgs(config, ["/bin/bash", "/host-linux/setup-graphical-desktop.sh"], { fakeRoot: true }), { env: androidProotEnv(config), stdio: ["ignore", "pipe", "pipe"] });
+                const child = spawn(config.prootPath, 
+                // `env PATH=…` because this runs as a bare shell: a rootfs with coreutils restored still has
+                // no default path inside proot, and the setup calls mkdir, cp and dpkg-deb by name.
+                androidProotArgs(config, ["/usr/bin/env", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "TMPDIR=/tmp", "/bin/dash", "/host-linux/setup-graphical-desktop.sh"], { fakeRoot: true }), { env: androidProotEnv(config), stdio: ["ignore", "pipe", "pipe"] });
                 let out = "";
                 child.stdout?.setEncoding("utf8").on("data", (chunk) => { out = (out + chunk).slice(-8000); });
                 child.stderr?.setEncoding("utf8").on("data", (chunk) => { out = (out + chunk).slice(-8000); });

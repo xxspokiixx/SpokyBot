@@ -22,7 +22,7 @@ function readable(rows, shown) {
     return rows.map((row) => shown(row.threadId) ? row : { ...row, threadId: "", summary: undefined, rule: undefined, requestId: undefined });
 }
 export function createStatusRoutes(deps) {
-    const { store, cfg, outboundCounts, staticDir: STATIC_DIR, sharedWorkspaceFullAccessEnabled, adminActivityRecording, configStatus, broadcast, browserEngineInstall, browserEngineInstallError, } = deps;
+    const { store, cfg, outboundCounts, staticDir: STATIC_DIR, sharedWorkspaceFullAccessEnabled, adminActivityRecording, configStatus, broadcast, browserEngineInstall, browserEngineInstallError, doctor, } = deps;
     return async ({ req, res, url, path, method, auth, json, readBody }) => {
         let m = null;
         const shown = deps.threadShown?.(auth) ?? (() => true);
@@ -31,7 +31,7 @@ export function createStatusRoutes(deps) {
             return json(res, 200, { app: "openmausbot", pid: process.pid, static: Boolean(STATIC_DIR), capabilities: {
                     guardedMessages: 1, guardedRequests: 1, guardedFullAccess: 1, guardedOnBehalfOf: 1,
                     ...(sharedWorkspaceFullAccessEnabled() ? { sharedWorkspaceFullAccess: 1 } : {}),
-                } });
+                }, ...(doctor ? { doctor: doctor() } : {}) });
         }
         // JSON-only, so a form posted from another local page cannot start the install. One install at a time.
         if (method === "POST" && path === "/api/browser-engine/install") {

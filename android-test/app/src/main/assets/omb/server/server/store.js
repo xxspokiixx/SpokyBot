@@ -12,6 +12,7 @@ import { botOwner, chiefConflict, chiefScope, ownerEmail } from "../shared/bot-o
 import { ensureSections, readSections, changeEmptySection } from "./section-context.js";
 import { removeBotFolder, soulFile, soulHash, writeSoulMirror } from "./bot-folder.js";
 import { peerAllowKey } from "./peer-approval-key.js";
+import { rewriteGrantLists } from "./always-allow.js";
 import { DATA_DIR, EVENTS_DIR, NATIVE_DIR, loadBrowserProfileIdAliases } from "./config.js";
 import * as mdb from "./message-db.js";
 import { forgetBotMemoryJournal, journalFile } from "./memory-journal.js";
@@ -1526,6 +1527,14 @@ export class Store {
             this.saveBots();
         this.emit({ type: "bot", botId: id });
         return bot;
+    }
+    /** Rewrites a bot's own "Always allow" list and each of its threads' in one save (server/always-allow.ts owns the
+     * rule). `removal`: a failed save keeps the change in force, since the person asked for less access, not more. */
+    rewriteGrants(botId, rewrite, removal = false) {
+        const bot = this.bot(botId);
+        if (!bot)
+            return false;
+        return rewriteGrantLists(bot, rewrite, () => this.saveBots(), removal);
     }
     clearVoiceSelections() {
         const changed = this.bots.filter((bot) => bot.voice !== undefined && bot.voice !== "");
