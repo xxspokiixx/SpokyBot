@@ -6,6 +6,10 @@ import { cn } from "@/lib/cn";
 import { deliverDeletion, sendSoftKey, typeOnDesktop } from "@/lib/desktop-connection";
 import { t } from "@/lib/i18n";
 
+/** One invisible character the field always keeps, so Backspace has something to delete. A zero-width
+ *  space renders as nothing, so the field looks empty and nothing visible can leak to the guest. */
+const SENTINEL = "\u200B";
+
 /** Android raises its soft keyboard only for a focused text field, so the person's keystrokes land in
  *  an offscreen field and are forwarded to the remote desktop from there. Kept per viewer: the
  *  virtual keyboard is one shared surface, and two of them would steal focus from each other. */
@@ -13,10 +17,21 @@ export function useSoftKeyboard(client: () => RFB | null) {
   const field = useRef<HTMLTextAreaElement>(null);
   const [open, setOpen] = useState(false);
 
+  /** One invisible character the field always keeps, with the caret behind it.
+   *
+   *  A field with nothing in it answers Backspace with silence: the browser has nothing to remove,
+   *  so it emits no edit at all, and a phone keyboard that reports Backspace as an edit rather than
+   *  as a key never reaches the desktop. The field therefore always holds something the key can
+   *  delete, and every edit here is intercepted, so the character itself never reaches the guest. */
+  const resetField = (node: HTMLTextAreaElement) => {
+    if (node.value !== SENTINEL) node.value = SENTINEL;
+    try { node.setSelectionRange(SENTINEL.length, SENTINEL.length); } catch { /* unfocused */ }
+  };
+
   const raise = () => {
     const node = field.current;
     if (!node) return;
-    node.value = "";
+    resetField(node);
     node.focus({ preventScroll: true });
     setOpen(true);
   };
@@ -41,70 +56,102 @@ export function useSoftKeyboard(client: () => RFB | null) {
     return () => document.removeEventListener("focusin", hold);
   }, [open]);
 
-  /** Everything the keyboard commits arrives here: characters, and the deletions it reports as an
-   *  edit rather than as a key. A phone reports a whole word through beforeinput even when it emits
-   *  no keydown per letter, which is what dictation, autocorrect and every IME do. */
-  const onBeforeInput = (event: React.FormEvent<HTMLTextAreaElement>) => {
-    const rfb = client();
-    if (!rfb) return;
-    const native = event.nativeEvent as InputEvent;
-    // The field is emptied after every keystroke, so it never holds text of its own: a deletion
-    // here has nothing local to remove and belongs to the desktop, which is what the person sees.
-    if (deliverDeletion(rfb, native.inputType)) {
-      event.preventDefault();
-      field.current!.value = "";
-      return;
-    }
-    if (!native.data) return;
-    event.preventDefault();
-    typeOnDesktop(rfb, native.data);
-    field.current!.value = "";
+  /** The last edit acted on, so a keystroke that arrives through more than one listener is sent once.
+   *
+   *  A WebView reports one Backspace through up to three paths — keydown, beforeinput and input —
+   *  and `preventDefault` on keydown does not always stop the other two, which made one tap delete
+   *  four characters. The guard is by content and time, not by path, so it holds whichever
+   *  combination a keyboard uses. */
+  const acted = useRef<{ what: string; at: number } | null>(null);
+  const claim = (what: string) => {
+    const now = Date.now();
+    if (acted.current && acted.current.what === what && now - acted.current.at < 120) return false;
+    acted.current = { what, at: now };
+    return true;
   };
 
-  /** Keys that are not characters — Enter, Backspace, the arrows — come here. A printable key also
-   *  lands here when the runtime skips `beforeinput`; the two paths cannot both act on one keystroke,
-   *  because sending a key here cancels the edit that would have followed it. */
+  /** Edits come from the browser, which is the one path every keyboard shares. Attached natively:
+   *  React's onBeforeInput is a polyfill over a non-standard textInput event that a WebView does not
+   *  always emit, and a phone's Backspace arrives only as an edit. */
+  useEffect(() => {
+    const node = field.current;
+    if (!node) return;
+    const send = (inputType: string, data: string | null) => {
+      const rfb = client();
+      if (!rfb) return;
+      if (!claim(`${inputType}:${data ?? ""}`)) return;
+      // The field holds only the sentinel, so the browser's own edit is never wanted: the desktop
+      // is what the person sees, and the sentinel must survive for the next Backspace.
+      if (deliverDeletion(rfb, inputType) || data) {
+        if (data) typeOnDesktop(rfb, data);
+      }
+      resetField(node);
+    };
+    const onEdit = (event: Event) => {
+      const { inputType, data } = event as InputEvent;
+      event.preventDefault();
+      send(inputType, data ?? null);
+    };
+    // A runtime that drops beforeinput still fires input, where the value is the record of the edit:
+    // text means something was typed, and a lost sentinel means something was deleted.
+    const onInput = () => {
+      const typed = node.value.split(SENTINEL).join("");
+      send(typed ? "insertText" : "deleteContentBackward", typed || null);
+      resetField(node);
+    };
+    node.addEventListener("beforeinput", onEdit);
+    node.addEventListener("input", onInput);
+    return () => {
+      node.removeEventListener("beforeinput", onEdit);
+      node.removeEventListener("input", onInput);
+    };
+  }, [client]);
+
+  /** Keys that are not characters and produce no edit — the arrows, Tab, Escape, Home and End — are
+   *  the only ones sent here. Backspace and Delete are left to the browser so they become a single
+   *  edit, and every printable character likewise. */
   const onKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     const rfb = client();
-    if (!rfb) return;
+    const node = field.current;
+    if (!rfb || !node) return;
     if (event.nativeEvent.isComposing) return;
     if (event.ctrlKey || event.metaKey || event.altKey) return;
-    if (sendSoftKey(rfb, event)) {
-      // Without this the browser also emits the edit for the same key, and Backspace would delete
-      // twice on the desktop.
+    if (event.key === "Backspace" || event.key === "Delete") return;
+    if (event.key === "Enter") {
       event.preventDefault();
-      field.current!.value = "";
+      if (claim("enter")) typeOnDesktop(rfb, "\n");
+      resetField(node);
       return;
     }
-    if ([...event.key].length !== 1) return;
-    event.preventDefault();
-    typeOnDesktop(rfb, event.key);
-    field.current!.value = "";
+    if (sendSoftKey(rfb, event)) {
+      event.preventDefault();
+      resetField(node);
+    }
   };
 
-  return { field, open, raise, lower, onBeforeInput, onKeyDown };
+  return { field, open, raise, lower, onKeyDown };
 }
 
 export type SoftKeyboard = ReturnType<typeof useSoftKeyboard>;
 
-/** The field every soft key goes through. It stays in the layout and inside the viewport at one
- *  pixel: Android raises the keyboard only for an editable field it can focus, and `display:none`,
- *  a detached node, or one layered behind the desktop never takes that focus. It ignores pointer
- *  events, so the desktop under it stays drivable, and it is transparent so it is never seen. */
+/** The field every soft key goes through. It covers the desktop and is transparent, but it must be a
+ *  real editable field: Gboard gives a hidden, aria-hidden, one-pixel input a degraded connection
+ *  where letters arrive as keys and a Backspace produces no event at all. It is fully transparent
+ *  and ignores pointer events, so the desktop under it is what the person sees and touches. */
 export function SoftKeyboardField({ keyboard }: { keyboard: SoftKeyboard }) {
   return (
     <textarea
       ref={keyboard.field}
-      aria-hidden="true"
       tabIndex={-1}
+      inputMode="text"
+      enterKeyHint="send"
       autoCapitalize="sentences"
       autoComplete="off"
       autoCorrect="off"
       spellCheck={false}
-      onBeforeInput={keyboard.onBeforeInput}
       onKeyDown={keyboard.onKeyDown}
       onBlur={keyboard.lower}
-      className="pointer-events-none absolute left-0 top-0 h-px w-px resize-none border-0 bg-transparent p-0 text-transparent caret-transparent opacity-0 outline-none"
+      className="pointer-events-none absolute inset-0 size-full resize-none overflow-hidden border-0 bg-transparent p-0 text-base text-transparent caret-transparent opacity-0 outline-none"
     />
   );
 }
@@ -119,6 +166,10 @@ export function SoftKeyboardButton({ keyboard, className }: { keyboard: SoftKeyb
       title={title}
       aria-label={title}
       aria-pressed={keyboard.open}
+      // Pressing a button moves focus to the button, which would take it back from the field the
+      // keyboard types into and lower the keyboard again. The press is what raises it, so the
+      // browser's focus move is cancelled here.
+      onPointerDown={(event) => event.preventDefault()}
       onClick={() => (keyboard.open ? keyboard.lower() : keyboard.raise())}
     >
       <Keyboard size={16} aria-hidden="true" />

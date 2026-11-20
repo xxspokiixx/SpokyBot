@@ -128,13 +128,13 @@ describe("the live desktop", () => {
     expect(keyboard.getAttribute("aria-pressed"), "the keyboard is up").toBe("true");
     const field = document.querySelector<HTMLTextAreaElement>("textarea")!;
     expect(document.activeElement, "the soft keyboard types into the field").toBe(field);
-    // A phone keyboard with no physical key behind it sends keydown for each character it inserts.
+    // A phone keyboard commits what the person typed as an edit on the field.
     const sent = () => (fixture.attempts[0]!.client.sendKey.mock.calls as Array<[number, string | null, boolean?]>);
     const keysyms = () => sent().filter(([, , down]) => down !== false).map(([keysym]) => keysym);
     flushSync(() => {
-      for (const key of ["l", "s"]) field.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+      field.dispatchEvent(new InputEvent("beforeinput", { inputType: "insertText", data: "ls", bubbles: true, cancelable: true }));
     });
-    // The printable keys carry their code point, which is what X reads for a Latin letter.
+    // The characters carry their code points, which is what X reads for a Latin letter.
     expect(keysyms()).toEqual(["l".codePointAt(0), "s".codePointAt(0)]);
     flushSync(() => {
       field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -166,12 +166,72 @@ describe("the live desktop", () => {
     flushSync(() => button("Keyboard")!.click());
     const field = document.querySelector<HTMLTextAreaElement>("textarea")!;
     const sent = () => (fixture.attempts[0]!.client.sendKey.mock.calls as Array<[number, string | null, boolean?]>);
+    // Characters arrive as edits, the way an IME commits them.
     flushSync(() => {
-      field.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
-      field.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", bubbles: true }));
+      field.dispatchEvent(new InputEvent("beforeinput", { inputType: "insertText", data: "a", bubbles: true, cancelable: true }));
+      field.dispatchEvent(new InputEvent("beforeinput", { inputType: "deleteContentBackward", bubbles: true, cancelable: true }));
     });
-    // One character, then a Backspace pressed and released: the desktop sees both in order.
+    // The character, then a Backspace pressed and released: the desktop sees both in order.
     expect(sent().map(([keysym, , down]) => (down === undefined ? keysym : down ? keysym : "up")))
       .toEqual(["a".codePointAt(0), 0xff08, "up"]);
+  });
+
+  it("deletes once when one Backspace arrives through several listeners", async () => {
+    flushSync(() => fixture.attempts[0]!.events.connected());
+    draw({ expanded: true });
+    await settle();
+    flushSync(() => button("Keyboard")!.click());
+    const field = document.querySelector<HTMLTextAreaElement>("textarea")!;
+    const sent = () => (fixture.attempts[0]!.client.sendKey.mock.calls as Array<[number, string | null, boolean?]>);
+    const backspaces = () => sent().filter(([keysym, , down]) => keysym === 0xff08 && down === true).length;
+
+    // A WebView reports one Backspace as a keydown, a beforeinput and an input. All three arrive
+    // here for a single press, and the desktop must see exactly one.
+    flushSync(() => {
+      field.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", bubbles: true }));
+      field.dispatchEvent(new InputEvent("beforeinput", { inputType: "deleteContentBackward", bubbles: true, cancelable: true }));
+      field.value = "";
+      field.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    });
+    expect(backspaces(), "one press deletes one character").toBe(1);
+  });
+
+  it("deletes when the keyboard reports Backspace as an edit, which is what a phone does", async () => {
+    flushSync(() => fixture.attempts[0]!.events.connected());
+    draw({ expanded: true });
+    await settle();
+    flushSync(() => button("Keyboard")!.click());
+    const field = document.querySelector<HTMLTextAreaElement>("textarea")!;
+    const sent = () => (fixture.attempts[0]!.client.sendKey.mock.calls as Array<[number, string | null, boolean?]>);
+
+    // A phone's keyboard is an IME: Backspace arrives as an edit on the field, never as a keydown.
+    // The browser only emits that edit when the field holds something to delete, which is why the
+    // field keeps an invisible character and the caret stays behind it.
+    expect(field.value, "the field keeps something to delete").toHaveLength(1);
+    expect(field.selectionStart).toBe(1);
+
+    flushSync(() => {
+      field.dispatchEvent(new InputEvent("beforeinput", { inputType: "deleteContentBackward", bubbles: true, cancelable: true }));
+    });
+    expect(sent().filter(([, , down]) => down === true).map(([keysym]) => keysym)).toEqual([0xff08]);
+    // The sentinel is restored, so the next Backspace is not silent.
+    expect(field.value, "still something to delete").toHaveLength(1);
+    expect(field.selectionStart).toBe(1);
+  });
+
+  it("never sends the invisible character itself to the desktop", async () => {
+    flushSync(() => fixture.attempts[0]!.events.connected());
+    draw({ expanded: true });
+    await settle();
+    flushSync(() => button("Keyboard")!.click());
+    const field = document.querySelector<HTMLTextAreaElement>("textarea")!;
+    const sent = () => (fixture.attempts[0]!.client.sendKey.mock.calls as Array<[number, string | null, boolean?]>);
+    // The IME commits a word the way a keyboard with suggestions does.
+    flushSync(() => {
+      field.dispatchEvent(new InputEvent("beforeinput", { inputType: "insertText", data: "ls", bubbles: true, cancelable: true }));
+    });
+    const keysyms = sent().map(([keysym]) => keysym);
+    expect(keysyms).toEqual(["l".codePointAt(0), "s".codePointAt(0)]);
+    expect(keysyms, "the sentinel is not text").not.toContain(0x200b);
   });
 });
