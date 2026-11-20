@@ -192,16 +192,74 @@ function replayDelivered(
 const CORRECTIVE_ROUND = "[OpenMausBot: a tool call in this turn failed (its result is marked ok:false). Re-run the failed operations with corrected inputs where possible, check the results, then give your final answer. Do not report results you did not get.]";
 const NUDGE_ANNOUNCED_ACTION = "You said what you would do next but called no tool. Use your tools for only the remaining work, or reply with verified results if nothing is left to do. Never repeat an operation that succeeded, was denied, or may already have taken effect; inspect its state instead. Do not retry a destructive operation.";
 
+/**
+ * The first-person promise a reply opens with, in the languages people actually write in. A bot
+ * that says "voy a revisarlo" and stops needs the same nudge as one that says "I'll check": the
+ * person asked for work, not for a plan, and the promise is all that separates the two.
+ *
+ * Each alternative is a subject and an intent, not a sentence: the verb list that follows is what
+ * makes it a promise of a tool call rather than an opinion. Nothing here matches a finished answer,
+ * which is why "listo, ya está" and "found three models" stay quiet.
+ */
+const PROMISE_SUBJECT = [
+  // English.
+  "i(?:'|\u2019)ll", "i will", "i(?:'|\u2019)m going to", "i am going to", "let me", "now i(?:'|\u2019)ll",
+  // Spanish. "Voy a", "déjame", "procedo a" and the gerund that a model uses mid-sentence.
+  "voy a", "vamos a", "d\u00e9jame", "dejame", "procedo a", "ahora voy a", "ahora mismo voy a",
+  "intentar\u00e9", "intentare", "tratar\u00e9 de", "tratare de", "me dispongo a", "estoy revisando",
+  // Portuguese and Italian, which cost nothing to accept and read the same way.
+  "vou", "deixe-me", "adesso vou", "sto per", "provo a", "lascio che",
+].join("|");
+
+/** The verbs a promise points at a tool: the ones that act on the world rather than report on it. */
+const PROMISE_ACT = [
+  "check", "verify", "search", "look", "inspect", "read", "fetch", "run", "execute", "open", "launch",
+  "create", "write", "pull", "load", "navigate", "browse", "download", "install", "update", "test",
+  "review", "scan", "list", "gather", "find", "try", "start", "prepare", "examine", "analyze", "analyse",
+  "revisar", "verificar", "buscar", "mirar", "inspeccionar", "leer", "ejecutar", "correr", "abrir",
+  "crear", "escribir", "descargar", "instalar", "actualizar", "probar", "comprobar", "consultar",
+  "examinar", "analizar", "listar", "buscar", "encontrar", "preparar", "empezar", "iniciar",
+  "procurar", "provare", "eseguire", "aprire", "leggere", "cercare",
+].join("|");
+
+/** A gerund opens a reply without a subject: "Checking the files now", "Revisando los archivos". */
+const GERUND_OPEN = /^\w+(?:ing|ando|iendo|endo)\b/i;
+
+/** A word boundary that survives accents: \b is defined on ASCII letters only, so "har\u00e9" ends
+ *  without one and every accented verb would slip through unmatched. */
+const WORD_END = "(?![a-z\\u00e1\\u00e9\\u00ed\\u00f3\\u00fa\\u00f1\\u00fc])";
+
+/** Adverbs a model puts before the subject, with or without a comma: "Primero voy a", "Ahora mismo
+ *  reviso", "Ok, lo har\u00e9". Accepted only in front of a real promise, never on their own. */
+const LEAD_IN = "(?:(?:primero|ahora|bueno|ok|okay|vale|perfecto|entendido|bien|claro|de acuerdo|luego|enseguida|despu\u00e9s|entonces)";
+const LEAD = `${LEAD_IN}[,;:]?\\s*){0,2}`;
+
+const PROMISE = new RegExp(
+  `^${LEAD}(?:${PROMISE_SUBJECT})${WORD_END}[^.!?\\n]{0,80}?(?:${PROMISE_ACT})${WORD_END}`,
+  "i",
+);
+
+/** "Lo haré", "lo reviso", "me encargo": a promise whose verb is the whole action, with no tool named.
+ *  A short opener ("Entendido,", "Perfecto,", "Ok,") may precede it. The verb is closed with a
+ *  negative lookahead rather than \b, because \b does not fire after an accented letter. */
+const PRONOUN_PROMISE = /^(?:[^.!?\n]{0,30}?[,;:]\s*)?(?:lo|la|les|me encargo|me pongo)\s+[^.!?\n]{0,40}?(?:har[e\u00e9]|hago|reviso|veo|verifico|haremos|har\u00e1)(?![a-z\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1])/i;
+
+/** A bare verb opening a reply is the same promise with the subject dropped. */
+const BARE_PROMISE = new RegExp(`^(?:${PROMISE_ACT})${WORD_END}`, "i");
+
+/** A colon, a dash or an ellipsis at the end says "and now this", which is a promise with no verb yet. */
+const TRAILING_OPEN = /(?:[:\u2014\u2013]|\.\.\.|\u2026)$/;
+
 export function announcesAction(text: string): boolean {
   const reply = text.trim();
-  if (!reply || reply.length > 4_000 || reply.includes("?")) return false;
-  if (reply.length > 400) {
-    const tail = reply.split(/\n\s*\n/).at(-1)!.trim();
-    return tail.length <= 400 && /^(?:let me|i['\u2019]ll|i will|i(?:['\u2019]m| am) going to)\s+(?:now\s+)?(?:execute|send|type|press|launch|open|check|inspect|read|fetch|run|create|write|verify)\b/i.test(tail);
-  }
-  return /(?:[:\u2014\u2013]|\.\.\.|\u2026)$/.test(reply) ||
-    /^(?:checking|let me(?! know\b)|i'll|i will|i'm going to|i am going to|opening|pulling|looking|searching|navigating|reading|fetching|loading|now (?:i'll|let me|opening|checking|pulling|reading))\b/i.test(reply) ||
-    /^i(?:['\u2019]m| am)\b[^.!?\n]*\band (?:i )?will\s+(?:launch|open|check|pull|look|search|navigate|read|fetch|load|run|inspect)\b/i.test(reply);
+  // A question is asking, not announcing: the person still has to answer before work can start.
+  if (!reply || reply.length > 4_000 || reply.includes("?") || reply.includes("\u00bf")) return false;
+  // Always judged by its last paragraph: that is where a model puts what it will do next, whether
+  // the reply is one line or a page of context.
+  const promise = reply.split(/\n\s*\n/).at(-1)!.trim();
+  if (!promise || promise.length > 400) return false;
+  return PROMISE.test(promise) || BARE_PROMISE.test(promise) || GERUND_OPEN.test(promise)
+    || PRONOUN_PROMISE.test(promise) || TRAILING_OPEN.test(promise);
 }
 
 const UNREADABLE_CALL = "[OpenMausBot: your last tool call could not be read, so nothing ran. Call the tool again using only the tools you were given, with valid JSON arguments.]";
