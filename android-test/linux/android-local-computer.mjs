@@ -251,7 +251,9 @@ function guestCommand(bashArgs, { fakeRoot = false, bindTmp = false } = {}) {
 }
 
 async function isDesktopUp() {
-  if (!existsSync(join(LINUX, "tmp", ".X11-unix", "X3"))) return false;
+  // The launcher starts Xvfb on :1, so its socket is X1; X3 was the old display and the probe
+  // answered "not running" for a desktop that was.
+  if (!existsSync(join(LINUX, "tmp", ".X11-unix", "X1"))) return false;
   return new Promise((resolve) => {
     const socket = createConnection({ host: "127.0.0.1", port: 56082 });
     const done = (up) => {
@@ -344,17 +346,22 @@ function shellQuote(value) {
 
 async function callTool(name, input) {
   let bashArgs;
+  // Every guest command shares the app's own tmp. Without this bind the guest falls back to the
+  // rootfs's /tmp, which is mode 0700 and owned by a uid the guest never holds, so `ls /tmp` and
+  // anything that writes a scratch file fails with EACCES and the tool reports the turn as failed
+  // even when the work itself succeeded.
+  const guest = (args) => guestCommand(args, { bindTmp: true });
   if (name === "bash") {
     const limit = Number.isInteger(input?.timeoutMs) ? input.timeoutMs : TOOL_TIMEOUT_MS;
     bashArgs = ["/bin/bash", "-lc", String(input?.command ?? "")];
-    const run = await runGuest(guestCommand(bashArgs), limit);
+    const run = await runGuest(guest(bashArgs), limit);
     const text = (run.out || "(no output)").trim();
     return { content: [{ type: "text", text }], isError: run.code !== 0 };
   }
   if (name === "read_file") {
     const path = normalizePath(input?.path ?? "/work");
     bashArgs = ["/bin/bash", "-lc", `cat -- ${shellQuote(path)}`];
-    const run = await runGuest(guestCommand(bashArgs), TOOL_TIMEOUT_MS);
+    const run = await runGuest(guest(bashArgs), TOOL_TIMEOUT_MS);
     return { content: [{ type: "text", text: run.out }], isError: run.code !== 0 };
   }
   if (name === "write_file") {
@@ -362,13 +369,13 @@ async function callTool(name, input) {
     const content = String(input?.content ?? "");
     mkdirSync(WORKSPACE, { recursive: true });
     bashArgs = ["/bin/bash", "-lc", `mkdir -p -- "$(dirname -- ${shellQuote(path)})" && printf %s ${shellQuote(content)} > ${shellQuote(path)} && echo "wrote ${path}"`];
-    const run = await runGuest(guestCommand(bashArgs), TOOL_TIMEOUT_MS);
+    const run = await runGuest(guest(bashArgs), TOOL_TIMEOUT_MS);
     return { content: [{ type: "text", text: (run.out || "").trim() || (run.code === 0 ? "wrote" : "write failed") }], isError: run.code !== 0 };
   }
   if (name === "list_files") {
     const path = input?.path === undefined || input?.path === "" ? "/work" : normalizePath(input.path);
     bashArgs = ["/bin/bash", "-lc", `ls -la -- ${shellQuote(path)}`];
-    const run = await runGuest(guestCommand(bashArgs), TOOL_TIMEOUT_MS);
+    const run = await runGuest(guest(bashArgs), TOOL_TIMEOUT_MS);
     return { content: [{ type: "text", text: run.out }], isError: run.code !== 0 };
   }
 
