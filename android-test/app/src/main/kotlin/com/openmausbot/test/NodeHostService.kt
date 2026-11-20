@@ -422,11 +422,22 @@ class NodeHostService : Service() {
                 File(linux, "proot").setExecutable(true, false)
                 File(linux, "loader").setExecutable(true, false)
                 File(linux, "omb-guest-chromium").setExecutable(true, false)
+                // The engines a person can pick in Settings: a key for one of them is useless until
+                // its CLI runs here, and the extractor leaves these at mode 0600.
+                for (engine in ENGINE_BINARIES) {
+                    File(linux, engine).takeIf { it.isFile }?.setExecutable(true, false)
+                }
                 stamp.writeText(linuxVersion)
             }
             val workspace = File(filesDir, WORKSPACE_DIR).apply { mkdirs() }
             val dataDir = File(filesDir, DATA_DIR_NAME).apply { mkdirs() }
             File(linux, "tmp").apply { mkdirs() }
+            // Restored on every start, not only after an extraction: a payload staged before an
+            // engine was added leaves that engine without its exec bit, and the server then
+            // reports the engine as unavailable for the whole life of the install.
+            for (engine in ENGINE_BINARIES) {
+                File(linux, engine).takeIf { it.isFile }?.setExecutable(true, false)
+            }
             writeGuestResolvConf(File(linux, "rootfs"))
             val userData = File(filesDir, USER_DATA_DIR).apply { mkdirs() }
             val descriptor = File(userData, "cua-connection.json")
@@ -435,7 +446,7 @@ class NodeHostService : Service() {
                 "OMB_ANDROID_ROOTFS" to File(linux, "rootfs").absolutePath,
                 "OMB_ANDROID_WORKSPACE" to workspace.absolutePath,
                 "OMB_ANDROID_DATA_DIR" to dataDir.absolutePath,
-                "OMB_EXTRA_PATH" to File(linux, "bin").absolutePath,
+                "OMB_EXTRA_PATH" to linux.absolutePath,
                 "OMB_ANDROID_TMP_DIR" to File(linux, "tmp").absolutePath,
             )
             descriptor.writeText(
@@ -1128,6 +1139,10 @@ class NodeHostService : Service() {
         const val BASE_URL = "http://127.0.0.1:8799"
         private const val SKILLS_DIR = "skills"
         private const val LINUX_DIR = "linux"
+
+        /** Engine CLIs staged beside proot in files/linux, where OMB_EXTRA_PATH points. Each needs
+         *  its exec bit restored after extraction, or the server reports it as not executable. */
+        private val ENGINE_BINARIES = listOf("opencode")
         private const val USER_DATA_DIR = "user-data"
         private const val WORKSPACE_DIR = "workspace"
          private const val DATA_DIR_NAME = "data"

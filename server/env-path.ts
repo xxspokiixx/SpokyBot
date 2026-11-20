@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, extname, join } from "node:path";
+import { androidGuest, guestCommandFor, needsGuestLoader } from "./android-guest.ts";
 
 function nvmBinDirs(): string[] {
   try {
@@ -392,6 +393,13 @@ function resolveWord(cli: string, args: string[], env?: NodeJS.ProcessEnv): Reso
 }
 
 export function resolveCliSpawn(cli: string, args: string[], env?: NodeJS.ProcessEnv): ResolvedSpawn {
+  // An engine staged on the phone is a glibc build Android cannot exec, so it runs inside the
+  // guest the same way every other guest command does.
+  const guest = androidGuest(env);
+  if (guest && needsGuestLoader(cli, env) && !cli.includes(" ")) {
+    const wrapped = guestCommandFor(guest, cli, args, env);
+    return { command: wrapped.command, args: wrapped.args };
+  }
   // An existing file wins over the tokenizer: candidate paths with spaces arrive unquoted.
   const trimmed = cli.trim();
   if (trimmed.includes(" ") && existsSync(trimmed)) return resolveWord(trimmed, args, env);
