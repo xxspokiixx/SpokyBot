@@ -18,7 +18,8 @@ const PREFIX = "/api/workspace-backup";
 const MAX_UPLOAD_BYTES = MAX_WORKSPACE_BACKUP_UPLOAD_BYTES;
 const MAX_CLIENT_STATE_BYTES = 2 * 1024 ** 2;
 const EXPIRES_MS = 60 * 60_000;
-const passwordSchema = z.string().min(1, "Use a password of at least 1 character.").max(1024);
+// Any non-empty password: the request body's own cap bounds it, not the password.
+const passwordSchema = z.string().min(1, "Use a password of at least 1 character.");
 const failure = (message: string, status = 400) => Object.assign(new Error(message), { status });
 type Artifact = { owner: string; kind: "download" | "upload" | "staged"; path?: string; expires: number; summary?: WorkspaceBackupSummary };
 type RestoreResult = { id?: string; restored?: boolean; safetyCopyPath?: string; clientState?: Record<string, string> };

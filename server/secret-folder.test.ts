@@ -58,4 +58,15 @@ describe("a bot's private secret files", () => {
     expect(uploadableFiles([secret], [workspace])).toEqual({ error: SECRET_FILE_REFUSAL });
     expect(uploadableFiles([join(workspace, "notes.txt")], [workspace])).toMatchObject({ files: [expect.stringContaining("notes.txt")] });
   });
+
+  it("leaves out the VPS ssh shim and config, which name this device's own folder and are written again at each start", () => {
+    // Reading ssh/bin/ssh is what failed an export with EACCES on the phone, and a restored copy would
+    // point at a data folder that does not exist on the destination.
+    for (const path of ["ssh/bin/ssh", "ssh/config", "ssh/bin", "ssh/bin/ssh.123.tmp"]) {
+      expect(omittedFromWorkspaceBackup(path), path).toBe(true);
+    }
+    // The staged identities and known hosts are the person's, so they still travel.
+    expect(omittedFromWorkspaceBackup("ssh/id_ed25519")).toBe(false);
+    expect(omittedFromWorkspaceBackup("ssh/known_hosts")).toBe(false);
+  });
 });

@@ -13,7 +13,7 @@ import { Worker } from "node:worker_threads";
 import { writeFileAtomic } from "./atomic.ts";
 import { WORKSPACE_BACKUP_CLIENT_KEYS } from "../shared/workspace-backup-client.ts";
 import { INSTRUCTION_FILE, restorePaths, validRelative } from "./workspace-backup-paths.ts";
-import { ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, liveDataEnginePath, managedTaskSkillLink, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
+import { ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, liveDataEnginePath, managedTaskSkillLink, regeneratedVpsSshPath, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
 import type { WorkspaceBackupClientState, WorkspaceBackupPrivateMetadata, WorkspaceBackupSummary, WorkspaceLeftBehind } from "../shared/workspace-backup.ts";
 
 export type { WorkspaceBackupSummary, WorkspaceBackupPrivateMetadata } from "../shared/workspace-backup.ts";
@@ -185,8 +185,8 @@ function assertLocalAuthOutsideSnapshot(dataDir: string): void {
   }
 }
 function passwordKey(password: string, salt: Buffer): Promise<Buffer> {
-  if (typeof password !== "string" || password.length < 1 || Buffer.byteLength(password) > 1024) {
-    throw new Error("Use a backup password of at least 1 character (at most 1024 bytes).");
+  if (typeof password !== "string" || password.length < 1) {
+    throw new Error("Use a backup password of at least 1 character.");
   }
   return new Promise((resolveKey, reject) => {
     scrypt(password, salt, 32, { N: 131_072, r: 8, p: 1, maxmem: 256 * 1024 ** 2 }, (error, key) => {
@@ -333,7 +333,7 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
       for (const name of readdirSync(directory).sort()) {
         if (!prefix && excluded(name)) continue;
         const path = prefix ? `${prefix}/${name}` : name;
-        if (excludedWorkspaceAuthPath(path) || ephemeralWorkspaceTokenPath(path) || redownloadedOrgLibraryPath(path) || liveDataEnginePath(path)) continue;
+        if (excludedWorkspaceAuthPath(path) || ephemeralWorkspaceTokenPath(path) || redownloadedOrgLibraryPath(path) || liveDataEnginePath(path) || regeneratedVpsSshPath(path)) continue;
         // Reject noncanonical spellings: a case-sensitive host must not export auth paths active on Windows/Mac.
         if (forbiddenArchivePath(path)) throw new Error("A workspace filename conflicts with a protected authentication or runtime path.");
         if (!validRelative(path)) throw new Error(`Cannot back up a name that cannot be restored on every supported platform, such as one with ":" or "\\", a trailing dot or space, or a Windows device name like CON or AUX; rename it first: ${path}`);
@@ -964,5 +964,5 @@ export function removeWorkspaceBackupJob(dataDir: string, id: string): void {
 }
 
 export function omittedFromWorkspaceBackup(path: string): boolean {
-  return excluded(path.split("/")[0]) || excludedWorkspaceAuthPath(path) || ephemeralWorkspaceTokenPath(path) || redownloadedOrgLibraryPath(path) || liveDataEnginePath(path);
+  return excluded(path.split("/")[0]) || excludedWorkspaceAuthPath(path) || ephemeralWorkspaceTokenPath(path) || redownloadedOrgLibraryPath(path) || liveDataEnginePath(path) || regeneratedVpsSshPath(path);
 }

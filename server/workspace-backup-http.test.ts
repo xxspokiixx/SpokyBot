@@ -162,3 +162,13 @@ it("accepts drafts between 1 and 2 MiB and enforces the preference cap in UTF-8 
   expect(archive.create).toHaveBeenCalledOnce();
   expect(readdirSync(join(dataDir, ".backups"))).toHaveLength(1);
 });
+
+it("accepts a backup password of any length, and refuses only an empty one", async () => {
+  // A long passphrase is stronger, not invalid: only emptiness is refused.
+  const long = "correct horse battery staple ".repeat(100);
+  expect(long.length).toBeGreaterThan(1024);
+  expect((await post("/api/workspace-backup/export", { password: long })).status).toBe(200);
+  expect(archive.create.mock.calls[0][1].password).toBe(long);
+  const empty = await post("/api/workspace-backup/export", { password: "" });
+  expect(empty.status).toBe(400);
+});
