@@ -323,6 +323,11 @@ class MainActivity : Activity() {
             }
         }
         root.addView(view)
+        // Android only raises its soft keyboard for a view that can hold focus, and the WebView
+        // starts unfocused; without this a tap in the desktop focuses its canvas and no keyboard
+        // ever appears, because the canvas is not an editable field.
+        view.isFocusable = true
+        view.isFocusableInTouchMode = true
         bootScreen.visibility = View.GONE
         webView = view
         pageReady = false

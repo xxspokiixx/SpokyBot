@@ -7,18 +7,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type Events = { connected(): void; disconnected(): void };
 const fixture = vi.hoisted(() => ({
-  attempts: [] as Array<{ target: string; events: Events; client: { focus: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> } }>,
+  attempts: [] as Array<{ target: string; events: Events; client: { focus: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn>; sendKey: ReturnType<typeof vi.fn> } }>,
   refuse: false,
-  typed: [] as string[],
 }));
-vi.mock("@/lib/desktop-connection", () => ({
+vi.mock("@/lib/desktop-connection", async (importOriginal) => ({
+  // Only the transport is played: the key mapping and the text encoder are the real ones, so the
+  // assertions read the keysyms that would reach the VNC server.
+  ...await importOriginal<typeof import("@/lib/desktop-connection")>(),
   connectDesktop: async (_screen: HTMLElement, target: string, options: { events: Events }) => {
     if (fixture.refuse) throw new Error("unreachable");
-    const client = { focus: vi.fn(), disconnect: vi.fn() };
+    const client = { focus: vi.fn(), disconnect: vi.fn(), sendKey: vi.fn() };
     fixture.attempts.push({ target, events: options.events, client });
     return client;
   },
-  typeOnDesktop: (_client: unknown, text: string) => fixture.typed.push(text),
 }));
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
@@ -40,7 +41,6 @@ const button = (label: string) => [...document.querySelectorAll("button")].find(
 beforeEach(async () => {
   fixture.attempts = [];
   fixture.refuse = false;
-  fixture.typed = [];
   const container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -107,22 +107,55 @@ describe("the live desktop", () => {
     root = createRoot(container);
   });
 
-  it("full screen keeps the same connection and offers Exit, typing and Hand back", async () => {
+  it("full screen keeps the same connection and offers Exit and Hand back", async () => {
     flushSync(() => fixture.attempts[0]!.events.connected());
     draw({ expanded: true });
     await settle();
     expect(fixture.attempts, "growing the view must not reconnect").toHaveLength(1);
-    const field = document.querySelector<HTMLInputElement>("input[aria-label='Text to type on the desktop']")!;
-    flushSync(() => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
-      setter.call(field, "hunter2");
-      field.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    flushSync(() => field.form!.requestSubmit());
-    expect(fixture.typed).toEqual(["hunter2"]);
     flushSync(() => button("Exit fullscreen")!.click());
     expect(props.onExpandedChange).toHaveBeenCalledWith(false);
     flushSync(() => button("Hand control back")!.click());
     expect(props.onHandBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("raises the tablet's keyboard from its button, and sends what it types", async () => {
+    flushSync(() => fixture.attempts[0]!.events.connected());
+    draw({ expanded: true });
+    await settle();
+    const keyboard = button("Keyboard")!;
+    expect(keyboard.getAttribute("aria-pressed")).toBe("false");
+    flushSync(() => keyboard.click());
+    expect(keyboard.getAttribute("aria-pressed"), "the keyboard is up").toBe("true");
+    const field = document.querySelector<HTMLTextAreaElement>("textarea")!;
+    expect(document.activeElement, "the soft keyboard types into the field").toBe(field);
+    // A phone keyboard with no physical key behind it sends keydown for each character it inserts.
+    const sent = () => (fixture.attempts[0]!.client.sendKey.mock.calls as Array<[number, string | null, boolean?]>);
+    const keysyms = () => sent().filter(([, , down]) => down !== false).map(([keysym]) => keysym);
+    flushSync(() => {
+      for (const key of ["l", "s"]) field.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+    });
+    // The printable keys carry their code point, which is what X reads for a Latin letter.
+    expect(keysyms()).toEqual(["l".codePointAt(0), "s".codePointAt(0)]);
+    flushSync(() => {
+      field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    // Enter is not a character, so it goes by keysym.
+    expect(keysyms().at(-1)).toBe(0xff0d);
+  });
+
+  it("a tap on the desktop raises the keyboard; a drag leaves it down", async () => {
+    flushSync(() => fixture.attempts[0]!.events.connected());
+    const desktop = document.querySelector<HTMLElement>("[role='application']")!;
+    // A drag moves the pixels, not the person's caret, so it must not pop a keyboard over them.
+    flushSync(() => {
+      desktop.dispatchEvent(new PointerEvent("pointerdown", { pointerType: "touch", clientX: 10, clientY: 10, bubbles: true }));
+      desktop.dispatchEvent(new PointerEvent("pointerup", { pointerType: "touch", clientX: 90, clientY: 90, bubbles: true }));
+    });
+    expect(button("Keyboard")!.getAttribute("aria-pressed")).toBe("false");
+    flushSync(() => {
+      desktop.dispatchEvent(new PointerEvent("pointerdown", { pointerType: "touch", clientX: 30, clientY: 30, bubbles: true }));
+      desktop.dispatchEvent(new PointerEvent("pointerup", { pointerType: "touch", clientX: 32, clientY: 31, bubbles: true }));
+    });
+    expect(button("Keyboard")!.getAttribute("aria-pressed")).toBe("true");
   });
 });

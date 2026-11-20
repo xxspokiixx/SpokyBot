@@ -75,3 +75,35 @@ export function typeOnDesktop(client: RFB, text: string): void {
     client.sendKey(code === 10 ? 0xff0d : code === 9 ? 0xff09 : code <= 255 ? code : 0x01000000 | code, null);
   }
 }
+
+/** The keys a soft keyboard produces that are not literal characters. A tablet sends these with no
+ *  physical key behind them, so they map to X keysyms rather than to `code`. Characters go through
+ *  `typeOnDesktop` instead, which is what beforeinput reports. */
+const NAMED_KEYSYMS: Record<string, number> = {
+  Enter: 0xff0d,
+  Backspace: 0xff08,
+  Tab: 0xff09,
+  Escape: 0xff1b,
+  Delete: 0xffff,
+  ArrowLeft: 0xff51,
+  ArrowUp: 0xff52,
+  ArrowRight: 0xff53,
+  ArrowDown: 0xff54,
+  Home: 0xff50,
+  End: 0xff57,
+  PageUp: 0xff55,
+  PageDown: 0xff56,
+  Insert: 0xff63,
+};
+
+/** Forwards one non-character key from the soft keyboard to the remote desktop. A chord needs a
+ *  modifier held down across both halves, which a soft keyboard cannot express, so it is left to
+ *  the person's physical keyboard and reports false. */
+export function sendSoftKey(client: RFB, event: { key: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean }): boolean {
+  if (event.ctrlKey || event.metaKey || event.altKey) return false;
+  const keysym = NAMED_KEYSYMS[event.key];
+  if (keysym === undefined) return false;
+  client.sendKey(keysym, event.key, true);
+  client.sendKey(keysym, event.key, false);
+  return true;
+}
