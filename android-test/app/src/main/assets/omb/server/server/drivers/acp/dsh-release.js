@@ -14,6 +14,7 @@ export const DSH_STANDALONE = {
             url: `${RELEASE}/${WHEEL}`,
             archive: "zip",
             executable: "deepseek_harness_runtime/runtime/deepseek-harness-sdk-runtime-linux-arm64",
+            command: "dsh",
             approxBytes: 80_243_585,
             sha256: "32b7bb7887ea89f12462274d1b21acfafb00d38d94e11a5d7122492f185e4f85",
             executableSha256: "8cc6cb454ec1737858efe12844915edd18911a6cae5e778569a6de85918fb9da",

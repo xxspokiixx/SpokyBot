@@ -19,6 +19,7 @@ import { PiDriver } from "./pi.js";
 import { MistralDriver } from "./mistral.js";
 import { CerebrasDriver } from "./cerebras.js";
 import { GroqDriver } from "./groq.js";
+import { NvidiaDriver } from "./nvidia.js";
 import { GreenferenceDriver } from "./greenference.js";
 import { MetaDriver } from "./meta.js";
 import { MuseCodeDriver } from "./muse-code.js";
@@ -45,6 +46,7 @@ export const BUILT_IN_DRIVERS = [
     MistralDriver,
     CerebrasDriver,
     GroqDriver,
+    NvidiaDriver,
     GreenferenceDriver,
     MetaDriver,
     MuseCodeDriver,

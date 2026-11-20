@@ -49,7 +49,7 @@ export function turnEngine(instance, configs, snapshot, cwd) {
         ...(cwd !== undefined ? { cwd } : {}),
     };
 }
-const CHAT_RUNTIME_DRIVERS = new Set(["cerebras", "greenference", "grok", "groq", "meta", "minimax", "mistral", "openai-compat"]);
+const CHAT_RUNTIME_DRIVERS = new Set(["cerebras", "greenference", "grok", "groq", "meta", "minimax", "mistral", "nvidia-nim", "openai-compat"]);
 /** Whether text may name the agents server: it contains `mcp__agents` (a server merely starting so counts
  * too) or `mcp__` then a wildcard. Security: plain substring tests; no pattern is ever built from config text. */
 function namesAgentsServer(text) {

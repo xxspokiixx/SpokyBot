@@ -31,6 +31,7 @@ import { parse as parseYaml } from "yaml";
 import { harnessHome } from "../../env-path.js";
 import { resolveCli } from "../../procs.js";
 import { createAcpDriver } from "./core.js";
+import { DSH_STANDALONE } from "./dsh-release.js";
 export const DEEPSEEK_MODELS = {
     default: "deepseek-official/deepseek-v4-flash",
     options: [
@@ -307,6 +308,8 @@ export const deepseekSupport = {
             linux: "npm install -g @deepseek-ai/dsh",
             win32: "npm install -g @deepseek-ai/dsh",
         },
+        // Where no npm runs (the phone), the vendor's own arm64 executable is downloaded instead.
+        standalone: DSH_STANDALONE,
         docsUrl: "https://github.com/deepseek-ai/deepseek-harness",
         needsNode: true,
         // Keyless is "paste a key in Settings", not a terminal sign-in.

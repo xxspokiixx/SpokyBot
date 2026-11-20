@@ -341,6 +341,7 @@ const appConfigSchema = z.object({
     mistral: z.object({ key: optionalText }).optional(),
     cerebras: z.object({ key: optionalText }).optional(), treg: z.object({ key: optionalText }).optional(), postiz: z.object({ key: optionalText, url: optionalText }).optional(),
     groq: z.object({ key: optionalText, url: optionalText }).optional(),
+    nvidia: z.object({ key: optionalText, url: optionalText }).optional(),
     greenference: z.object({ key: optionalText }).optional(),
     meta: z.object({ key: optionalText, url: optionalText }).optional(),
     deepseek: z.object({ key: optionalText }).optional(),
@@ -663,7 +664,7 @@ export function loadConfig() {
         }
     }
     // Env wins over the file for every credential: the desktop shell injects them as env at spawn.
-    for (const [name, env] of [["mistral", "MISTRAL_API_KEY"], ["cerebras", "CEREBRAS_API_KEY"], ["groq", "OMB_GROQ_API_KEY"], ["meta", "OMB_META_API_KEY"],
+    for (const [name, env] of [["mistral", "MISTRAL_API_KEY"], ["cerebras", "CEREBRAS_API_KEY"], ["groq", "OMB_GROQ_API_KEY"], ["nvidia", "OMB_NVIDIA_API_KEY"], ["meta", "OMB_META_API_KEY"],
         ["deepseek", "OMB_DEEPSEEK_API_KEY"], ["greenference", "OMB_GREENFERENCE_API_KEY"], ["xai", "XAI_API_KEY"]]) {
         cfg[name] = { ...cfg[name], ...(process.env[env] !== undefined ? { key: process.env[env] } : {}) };
     }
@@ -753,6 +754,7 @@ export function syncCredentialEnv(patch) {
         [patch.mistral?.key, "MISTRAL_API_KEY"],
         [patch.cerebras?.key, "CEREBRAS_API_KEY"], [patch.treg?.key, "OMB_TREG_KEY"], [patch.postiz?.key, "OMB_POSTIZ_API_KEY"],
         [patch.groq?.key, "OMB_GROQ_API_KEY"],
+        [patch.nvidia?.key, "OMB_NVIDIA_API_KEY"],
         [patch.greenference?.key, "OMB_GREENFERENCE_API_KEY"],
         [patch.meta?.key, "OMB_META_API_KEY"],
         [patch.deepseek?.key, "OMB_DEEPSEEK_API_KEY"],
@@ -860,7 +862,7 @@ export function saveConfig(patch, options = {}) {
     const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
     if (storedProfiles.success)
         disk.browserProfiles = storedProfiles.data;
-    for (const key of ["xai", "anthropic", "mistral", "cerebras", "treg", "postiz", "groq", "greenference", "meta", "deepseek", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "loopGuard", "onboarding", "browserEngine", "newBots", "safetyFloor"]) {
+    for (const key of ["xai", "anthropic", "mistral", "cerebras", "treg", "postiz", "groq", "nvidia", "greenference", "meta", "deepseek", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "loopGuard", "onboarding", "browserEngine", "newBots", "safetyFloor"]) {
         const section = checkedPatch[key];
         if (!section)
             continue;
@@ -1052,6 +1054,8 @@ export function instanceOwnsRouting(cfg, entry, routingDefaults) {
             return own(entry.environment?.CEREBRAS_API_KEY) || ownUrl("https://api.cerebras.ai/v1");
         case "groq":
             return own(entry.environment?.GROQ_API_KEY) || ownUrl("https://api.groq.com/openai/v1", cfg.groq?.url);
+        case "nvidia-nim":
+            return own(entry.environment?.NVIDIA_API_KEY) || ownUrl("https://integrate.api.nvidia.com/v1", cfg.nvidia?.url);
         case "greenference":
             return own(entry.environment?.GREENFERENCE_API_KEY) || ownUrl("https://llm.eu.greenference.com/v1");
         case "meta":
@@ -1075,6 +1079,8 @@ function injectedEnvironment(cfg, instanceId, driver) {
         environment.set("CEREBRAS_API_KEY", cfg.cerebras.key);
     if (driver === "groq" && cfg.groq?.key)
         environment.set("GROQ_API_KEY", cfg.groq.key);
+    if (driver === "nvidia-nim" && cfg.nvidia?.key)
+        environment.set("NVIDIA_API_KEY", cfg.nvidia.key);
     if (driver === "greenference" && cfg.greenference?.key)
         environment.set("GREENFERENCE_API_KEY", cfg.greenference.key);
     if (driver === "meta" && cfg.meta?.key)
@@ -1148,6 +1154,9 @@ export function instanceConfigs(cfg) {
         entry.environment = environment;
         if (entry.driver === "groq" && cfg.groq?.url && !ownsRouting) {
             entry.config = { ...entry.config, url: cfg.groq.url };
+        }
+        if (entry.driver === "nvidia-nim" && cfg.nvidia?.url && !ownsRouting) {
+            entry.config = { ...entry.config, url: cfg.nvidia.url };
         }
         if (entry.driver === "meta" && cfg.meta?.url && !ownsRouting) {
             entry.config = { ...entry.config, url: cfg.meta.url };
