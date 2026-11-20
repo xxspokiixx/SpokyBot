@@ -1,7 +1,7 @@
 // The wrapper's own contract: a glibc engine on the phone becomes a proot run, and nothing else does.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { androidGuest, guestCommandFor, needsGuestLoader } from "./android-guest.ts";
@@ -59,6 +59,21 @@ describe("a glibc engine on the phone", () => {
   it("is not wrapped anywhere but the phone", () => {
     expect(androidGuest({} as NodeJS.ProcessEnv)).toBeNull();
     expect(needsGuestLoader("opencode", {} as NodeJS.ProcessEnv)).toBe(false);
+  });
+
+  it("wraps an installed standalone engine, which lives outside the linux dir", () => {
+    const { env, dir } = phone();
+    try {
+      // An engine the app downloaded sits under tools/standalone/, not beside proot.
+      const installed = join(dir, "data", "tools", "standalone", "dsh", "bin", "dsh");
+      mkdirSync(dirname(installed), { recursive: true });
+      writeFileSync(installed, "binary");
+      expect(needsGuestLoader(installed, env), "an absolute installed engine is wrapped").toBe(true);
+      const wrapped = guestCommandFor(androidGuest(env)!, installed, ["--version"]);
+      // It rides its own mount, so the guest can name a file outside the linux dir.
+      expect(wrapped.args).toContain("/host-tool");
+      expect(wrapped.args.at(-1)).toBe("--version");
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
   it("works when the shell omits the tmp dir, which is what the server actually gets", () => {

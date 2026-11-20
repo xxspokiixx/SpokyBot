@@ -50,6 +50,43 @@ it("lets the headless client wait out the server's whole download, so the server
   expect(INSTALL_TIMEOUT_MS).toBeGreaterThan(STANDALONE_DOWNLOAD_TIMEOUT_MS);
 });
 
+it("publishes a downloaded engine under the name a person types, when the archive calls it something else", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "omb-standalone-command-"));
+  const base = join(scratch, "data");
+  const program = "program-bytes";
+  const executable = "runtime/long-name";
+  const release = fixtureRelease({
+    [standalonePlatformKey()]: {
+      url: "https://downloads.example.test/dsh",
+      sha256: "ab".repeat(32),
+      executableSha256: sha256(program),
+      archive: "zip",
+      executable,
+      command: "dsh",
+      approxBytes: program.length,
+    },
+  });
+  const engineDir = standaloneEngineDir(ENGINE, base);
+  const versionDir = join(engineDir, VERSION);
+  const source = join(versionDir, ...executable.split("/"));
+  mkdirSync(dirname(source), { recursive: true });
+  writeFileSync(source, program);
+  const bin = join(engineDir, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "long-name"), program);
+  resetPathCacheForTests();
+  resetStandaloneStateForTests();
+  try {
+    registerStandaloneBinDirs(base, [release]);
+    expect(readdirSync(bin)).toEqual(["dsh"]);
+    expect(readFileSync(join(bin, "dsh"), "utf8")).toBe(program);
+  } finally {
+    resetPathCacheForTests();
+    resetStandaloneStateForTests();
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
 describe("explaining a file-system failure", () => {
   const release = fixtureRelease({});
   const asset: StandaloneAsset = { url: "https://downloads.example.test/a", sha256: "0".repeat(64), executableSha256: "1".repeat(64), archive: "raw", executable: "x", approxBytes: 1 };

@@ -9,7 +9,7 @@
 // them. This wraps an engine the same way, so a glibc CLI starts on a phone exactly as it does in
 // the guest.
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 
 /** The guest paths a wrapped engine needs to find its own files and its config. */
 export interface AndroidGuestConfig {
@@ -40,21 +40,42 @@ export function androidGuest(env?: NodeJS.ProcessEnv): AndroidGuestConfig | null
   return { linuxDir, rootfs, tmpDir, ...(source.OMB_ANDROID_DATA_DIR ? { dataDir: source.OMB_ANDROID_DATA_DIR } : {}) };
 }
 
-/** Whether this process is a guest engine the phone has to run through proot. */
+/** Whether this process is a guest engine the phone has to run through proot: a binary staged beside
+ *  proot, or a bare name that resolves to one. An absolute path is checked where it points. */
 export function needsGuestLoader(cli: string, env?: NodeJS.ProcessEnv): boolean {
   const guest = androidGuest(env);
   if (!guest) return false;
-  // Only a binary staged beside proot is a glibc build; a guest `sh` or a Node script is not.
+  // An installed standalone engine is a glibc build like a staged one; anything else is not.
+  if (isAbsolutePath(cli)) return existsSync(cli);
   return existsSync(join(guest.linuxDir, cli));
 }
 
-/** Runs `cli` inside the guest: the phone's proot, its rootfs, and the loader it maps binaries with. */
+/** Absolute on the device, whichever separator the host path happens to use. */
+function isAbsolutePath(path: string): boolean {
+  return path.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(path);
+}
+
+/** The command to run for `executable`, wrapped when this is the phone and it is a guest build.
+ *  Anything else gets the binary untouched, so every desktop path stays exactly as it was. */
+export function guestInvocation(executable: string, args: string[], env: NodeJS.ProcessEnv = process.env): WrappedCommand {
+  const guest = androidGuest(env);
+  if (!guest || !isAbsolutePath(executable)) return { command: executable, args, env };
+  // Only an installed or staged engine is a guest build; the app's own Node is not.
+  if (!existsSync(executable)) return { command: executable, args, env };
+  return guestCommandFor(guest, executable, args, env);
+}
+
+/** Runs `cli` inside the guest: the phone's proot, its rootfs, and the loader it maps binaries with.
+ *  A bare name is looked up in the phone's linux dir; an absolute path (a standalone engine under
+ *  tools/, say) is bound in beside it, so a download anywhere under the app's data runs the same way. */
 export function guestCommandFor(guest: AndroidGuestConfig, cli: string, args: string[], env: NodeJS.ProcessEnv = process.env): WrappedCommand {
-  const binary = cli.startsWith("/") ? cli : join(guest.linuxDir, cli);
-  // The binary lives outside the rootfs, so it rides the /host-linux bind and is named from there.
-  const inside = `/host-linux/${binary.slice(guest.linuxDir.length + 1)}`;
+  const binary = isAbsolutePath(cli) ? cli : join(guest.linuxDir, cli);
   const binds = ["-b", `${guest.linuxDir}:/host-linux`, "-b", `${guest.tmpDir}:/tmp`];
   if (guest.dataDir) binds.push("-b", `${guest.dataDir}:/data`);
+  // A binary outside the linux dir rides its own mount, so the guest can name it at all.
+  const inLinux = binary.startsWith(guest.linuxDir);
+  let inside = inLinux ? `/host-linux/${binary.slice(guest.linuxDir.length + 1).split(sep).join("/")}` : "/host-tool";
+  if (!inLinux) binds.push("-b", `${binary}:/host-tool`);
   for (const file of ["passwd", "group"]) {
     const host = join(guest.rootfs, "etc", file);
     if (existsSync(host)) binds.push("-b", `${host}:/etc/${file}`);

@@ -33,6 +33,7 @@ import type { ModelCatalog } from "../../contracts.ts";
 import { harnessHome } from "../../env-path.ts";
 import { resolveCli } from "../../procs.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { DSH_STANDALONE } from "./dsh-release.ts";
 
 export const DEEPSEEK_MODELS: ModelCatalog = {
   default: "deepseek-official/deepseek-v4-flash",
@@ -296,6 +297,8 @@ export const deepseekSupport: AcpSupport = {
       linux: "npm install -g @deepseek-ai/dsh",
       win32: "npm install -g @deepseek-ai/dsh",
     },
+    // Where no npm runs (the phone), the vendor's own arm64 executable is downloaded instead.
+    standalone: DSH_STANDALONE,
     docsUrl: "https://github.com/deepseek-ai/deepseek-harness",
     needsNode: true,
     // Keyless is "paste a key in Settings", not a terminal sign-in.

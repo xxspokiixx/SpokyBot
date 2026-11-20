@@ -2,5 +2,6 @@
 // that no release here names is never trusted.
 import type { StandaloneRelease } from "./contracts.ts";
 import { OPENCODE_STANDALONE } from "./drivers/acp/opencode-release.ts";
+import { DSH_STANDALONE } from "./drivers/acp/dsh-release.ts";
 
-export const STANDALONE_RELEASES: readonly StandaloneRelease[] = [OPENCODE_STANDALONE];
+export const STANDALONE_RELEASES: readonly StandaloneRelease[] = [OPENCODE_STANDALONE, DSH_STANDALONE];

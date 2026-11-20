@@ -12,6 +12,7 @@ import {
   registerPathDir,
   resetPathCache,
   resetPathCacheForTests,
+  resolveCliSpawn,
   splitCliString,
   userHome,
 } from "./env-path.ts";
@@ -703,6 +704,34 @@ describe("registerFallbackPathDir", () => {
       const rescanned = augmentedPath().split(delimiter);
       expect(rescanned.indexOf(vendor)).toBeLessThan(rescanned.indexOf(fallback));
       rmSync(join(homedir(), ".opencode"), { recursive: true, force: true });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("a standalone engine on the phone", () => {
+  it("runs a copy found on PATH through the guest, not as a host binary", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-guest-spawn-"));
+    const linux = join(dir, "linux");
+    const data = join(dir, "data");
+    const bin = join(data, "tools", "standalone", "dsh", "bin");
+    mkdirSync(join(linux, "rootfs", "etc"), { recursive: true });
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(linux, "proot"), "proot");
+    writeFileSync(join(bin, "dsh"), "binary");
+    const env = {
+      OMB_ANDROID_STANDALONE: "1",
+      OMB_ANDROID_LINUX_DIR: linux,
+      OMB_ANDROID_ROOTFS: join(linux, "rootfs"),
+      OMB_ANDROID_DATA_DIR: data,
+      PATH: bin,
+    } as NodeJS.ProcessEnv;
+    try {
+      const resolved = resolveCliSpawn("dsh", ["--version"], env);
+      expect(resolved.command).toBe(join(linux, "proot"));
+      expect(resolved.args).toContain("/host-tool");
+      expect(resolved.args.at(-1)).toBe("--version");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
