@@ -76,6 +76,34 @@ export function typeOnDesktop(client: RFB, text: string): void {
   }
 }
 
+/** The X key a keyboard's deletion edit stands for. Android reports Backspace as an edit on the
+ *  focused field, not always as a key, and the field it edits is ours: the text never accumulates
+ *  there, so only the remote desktop can show the deletion. A range the person selected is one
+ *  backspace per character, because X deletes one keystroke at a time. */
+const DELETION_KEYSYMS: Record<string, number> = {
+  deleteContentBackward: 0xff08,
+  deleteWordBackward: 0xff08,
+  deleteSoftLineBackward: 0xff08,
+  deleteHardLineBackward: 0xff08,
+  deleteContentForward: 0xffff,
+  deleteWordForward: 0xffff,
+  deleteSoftLineForward: 0xffff,
+  deleteHardLineForward: 0xffff,
+};
+
+/** Sends the deletion a keyboard reported, so Backspace removes what the person sees on the desktop.
+ *  Returns false for an edit that is not a deletion, which the caller sends as text instead. */
+export function deliverDeletion(client: RFB, inputType: string, removed = 1): boolean {
+  const keysym = DELETION_KEYSYMS[inputType];
+  if (keysym === undefined) return false;
+  const repeats = Number.isFinite(removed) && removed > 0 ? Math.ceil(removed) : 1;
+  for (let index = 0; index < repeats; index++) {
+    client.sendKey(keysym, keysym === 0xff08 ? "Backspace" : "Delete", true);
+    client.sendKey(keysym, keysym === 0xff08 ? "Backspace" : "Delete", false);
+  }
+  return true;
+}
+
 /** The keys a soft keyboard produces that are not literal characters. A tablet sends these with no
  *  physical key behind them, so they map to X keysyms rather than to `code`. Characters go through
  *  `typeOnDesktop` instead, which is what beforeinput reports. */

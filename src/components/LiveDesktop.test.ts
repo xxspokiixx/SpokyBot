@@ -158,4 +158,20 @@ describe("the live desktop", () => {
     });
     expect(button("Keyboard")!.getAttribute("aria-pressed")).toBe("true");
   });
+
+  it("Backspace deletes on the desktop, not in the invisible field", async () => {
+    flushSync(() => fixture.attempts[0]!.events.connected());
+    draw({ expanded: true });
+    await settle();
+    flushSync(() => button("Keyboard")!.click());
+    const field = document.querySelector<HTMLTextAreaElement>("textarea")!;
+    const sent = () => (fixture.attempts[0]!.client.sendKey.mock.calls as Array<[number, string | null, boolean?]>);
+    flushSync(() => {
+      field.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+      field.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", bubbles: true }));
+    });
+    // One character, then a Backspace pressed and released: the desktop sees both in order.
+    expect(sent().map(([keysym, , down]) => (down === undefined ? keysym : down ? keysym : "up")))
+      .toEqual(["a".codePointAt(0), 0xff08, "up"]);
+  });
 });

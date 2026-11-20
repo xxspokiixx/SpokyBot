@@ -2,7 +2,7 @@
 // What a soft keyboard's keys become on the wire, without a server.
 import { describe, expect, it, vi } from "vitest";
 
-import { sendSoftKey, typeOnDesktop } from "./desktop-connection.ts";
+import { deliverDeletion, sendSoftKey, typeOnDesktop } from "./desktop-connection.ts";
 
 function client() {
   const sendKey = vi.fn();
@@ -61,5 +61,30 @@ describe("the tablet's keys on the remote desktop", () => {
     const beyond = client();
     typeOnDesktop(beyond as never, "日");
     expect(sent(beyond)[0]![0]).toBe(0x01000000 | "日".codePointAt(0)!);
+  });
+
+  it("deletes on the desktop when the person deletes, whichever way the keyboard reports it", () => {
+    // A keyboard that reports the deletion as an edit, with no character to send.
+    const edit = client();
+    expect(deliverDeletion(edit as never, "deleteContentBackward")).toBe(true);
+    expect(sent(edit)[0]![0], "backspace keysym").toBe(0xff08);
+
+    // Android often sends Backspace as a keydown instead, and that path must delete too.
+    const key = client();
+    expect(sendSoftKey(key, { key: "Backspace" })).toBe(true);
+    expect(sent(key)[0]![0]).toBe(0xff08);
+
+    // Forward delete is a different keysym, and a multi-character deletion repeats it.
+    const forward = client();
+    expect(deliverDeletion(forward as never, "deleteContentForward")).toBe(true);
+    expect(sent(forward)[0]![0]).toBe(0xffff);
+
+    // A selection the person cleared needs one keystroke per character, or only the last one goes.
+    const range = client();
+    deliverDeletion(range as never, "deleteContentBackward", 3);
+    expect(sent(range).filter(([, , down]) => down === true)).toHaveLength(3);
+
+    // An insertion is not a deletion, so the caller sends its text instead.
+    expect(deliverDeletion(client() as never, "insertText")).toBe(false);
   });
 });

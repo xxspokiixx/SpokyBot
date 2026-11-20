@@ -3,7 +3,7 @@ import { Keyboard } from "lucide-react";
 import type RFB from "@novnc/novnc";
 
 import { cn } from "@/lib/cn";
-import { sendSoftKey, typeOnDesktop } from "@/lib/desktop-connection";
+import { deliverDeletion, sendSoftKey, typeOnDesktop } from "@/lib/desktop-connection";
 import { t } from "@/lib/i18n";
 
 /** Android raises its soft keyboard only for a focused text field, so the person's keystrokes land in
@@ -41,29 +41,41 @@ export function useSoftKeyboard(client: () => RFB | null) {
     return () => document.removeEventListener("focusin", hold);
   }, [open]);
 
-  /** Characters arrive here: a phone keyboard reports a word through beforeinput even when it emits
+  /** Everything the keyboard commits arrives here: characters, and the deletions it reports as an
+   *  edit rather than as a key. A phone reports a whole word through beforeinput even when it emits
    *  no keydown per letter, which is what dictation, autocorrect and every IME do. */
   const onBeforeInput = (event: React.FormEvent<HTMLTextAreaElement>) => {
     const rfb = client();
     if (!rfb) return;
     const native = event.nativeEvent as InputEvent;
-    // A deletion the person made before sending is theirs to undo in the field, not on the desktop.
-    if (native.inputType === "deleteContentBackward" && !native.data) return;
+    // The field is emptied after every keystroke, so it never holds text of its own: a deletion
+    // here has nothing local to remove and belongs to the desktop, which is what the person sees.
+    if (deliverDeletion(rfb, native.inputType)) {
+      event.preventDefault();
+      field.current!.value = "";
+      return;
+    }
     if (!native.data) return;
     event.preventDefault();
     typeOnDesktop(rfb, native.data);
     field.current!.value = "";
   };
 
-  /** Keys that are not characters — Enter, Backspace, the arrows — have no `data`, so they come here.
-   *  A printable key also lands here when the runtime skips `beforeinput` (an older WebView, and a
-   *  hardware keyboard); the two paths never both fire for one keystroke, so nothing repeats. */
+  /** Keys that are not characters — Enter, Backspace, the arrows — come here. A printable key also
+   *  lands here when the runtime skips `beforeinput`; the two paths cannot both act on one keystroke,
+   *  because sending a key here cancels the edit that would have followed it. */
   const onKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     const rfb = client();
     if (!rfb) return;
     if (event.nativeEvent.isComposing) return;
     if (event.ctrlKey || event.metaKey || event.altKey) return;
-    if (sendSoftKey(rfb, event)) { field.current!.value = ""; return; }
+    if (sendSoftKey(rfb, event)) {
+      // Without this the browser also emits the edit for the same key, and Backspace would delete
+      // twice on the desktop.
+      event.preventDefault();
+      field.current!.value = "";
+      return;
+    }
     if ([...event.key].length !== 1) return;
     event.preventDefault();
     typeOnDesktop(rfb, event.key);
