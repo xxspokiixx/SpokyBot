@@ -47,6 +47,7 @@ class NodeHostService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         createChannel()
         Log.d(TAG, "onCreate")
@@ -63,6 +64,11 @@ class NodeHostService : Service() {
         startAsForeground()
         if (NodeState.status.value.phase == NodeState.Phase.Ready) {
             postNotification(getString(R.string.notif_ready))
+            // The server is already up, but this WebView may have no session: a reinstall clears its
+            // cookie store while the data folder, and the sessions registry inside it, survive. Pairing
+            // only ran on the boot that started the server, so without this the page opens on the
+            // pairing screen and stays there. pairWebView starts its own coroutine.
+            pairWebView()
             return START_STICKY
         }
         scope.launch { runBoot() }
@@ -77,6 +83,7 @@ class NodeHostService : Service() {
 
     override fun onDestroy() {
         Log.d(TAG, "onDestroy")
+        if (instance === this) instance = null
         stopping = true
         stopNode()
         scope.cancel()
@@ -903,60 +910,84 @@ class NodeHostService : Service() {
         return false
     }
 
+    private var pairingAttempts = 0
+
     private fun pairWebView() {
         scope.launch {
+            // Each attempt mints a session when the cookie store refuses the one it gets, so an
+            // unattended retry loop would fill the sessions list. Few tries, then let the person pair.
+            if (pairingAttempts >= MAX_PAIRING_ATTEMPTS) {
+                NodeState.update(detail = "this browser still has no session; pair it from Settings -> Remote access")
+                return@launch
+            }
+            pairingAttempts++
             NodeState.update(detail = "pairing WebView")
             val existing = currentCookie()
             if (existing != null && verifySession(existing)) {
                 NodeState.update(paired = true, detail = "session restored")
                 return@launch
             }
-            val mint = http(
-                "POST",
-                URL("$BASE_URL/api/auth/pairing"),
-                body = json("label" to CODE_LABEL),
-                timeoutMs = 8_000,
-            )
-            if (mint == null || mint.status != 200) {
-                NodeState.update(detail = "pairing mint failed: ${mint?.status ?: "no response"} ${mint?.body?.take(200) ?: ""}")
-                return@launch
+            // The first boot after a reinstall can reach this before the server accepts pairings, and a
+            // failed mint used to leave the page unauthenticated until the next restart.
+            if (!mintAndStoreSession()) {
+                repeat(4) { attempt ->
+                    delay(1_500L * (attempt + 1))
+                    if (mintAndStoreSession()) return@launch
+                }
             }
-            val code = extractJsonString(mint.body, "code")
-            if (code == null) {
-                NodeState.update(detail = "pairing body missing code: ${mint.body.take(200)}")
-                return@launch
-            }
-            val body = normalizeExistingCode(code)
-            val pair = http(
-                "POST",
-                URL("$BASE_URL/api/auth/pair"),
-                body = json("code" to body, "label" to "Android WebView", "cookie" to true, "attemptId" to UUID.randomUUID().toString()),
-                timeoutMs = 8_000,
-            )
-            if (pair == null || pair.status != 200) {
-                NodeState.update(detail = "pair failed: ${pair?.status ?: "no response"} ${pair?.body?.take(200) ?: ""}")
-                return@launch
-            }
-            val cookies = pair.setCookies
-            if (cookies.isEmpty()) {
-                NodeState.update(detail = "pair success without set-cookie: ${pair.body.take(200)}")
-                return@launch
-            }
-            val stored = withContext(Dispatchers.Main) {
-                val manager = CookieManager.getInstance()
-                for (cookie in cookies) manager.setCookie("$BASE_URL/", cookie.trim())
-                manager.flush()
-                manager.getCookie(BASE_URL)
-            }
-            if (stored == null || !verifySession(stored)) {
-                NodeState.update(detail = "cookie injection or session verify failed")
-                return@launch
-            }
+            // The page was served before the cookie existed, so it is still the pairing screen: the
+            // Activity reloads it once `paired` changes, and this is what changes it for a page that
+            // was already attached.
             NodeState.update(paired = true, detail = "WebView session paired")
         }
     }
 
-    private suspend fun currentCookie(): String? = withContext(Dispatchers.Main) {
+    /** Mints a pairing code on this server and keeps the session cookie it answers with. */
+    private suspend fun mintAndStoreSession(): Boolean {
+        val mint = http(
+            "POST",
+            URL("$BASE_URL/api/auth/pairing"),
+            body = json("label" to CODE_LABEL),
+            timeoutMs = 8_000,
+        )
+        if (mint == null || mint.status != 200) {
+            NodeState.update(detail = "pairing mint failed: ${mint?.status ?: "no response"} ${mint?.body?.take(200) ?: ""}")
+            return false
+        }
+        val code = extractJsonString(mint.body, "code")
+        if (code == null) {
+            NodeState.update(detail = "pairing body missing code: ${mint.body.take(200)}")
+            return false
+        }
+        val body = normalizeExistingCode(code)
+        val pair = http(
+            "POST",
+            URL("$BASE_URL/api/auth/pair"),
+            body = json("code" to body, "label" to "Android WebView", "cookie" to true, "attemptId" to UUID.randomUUID().toString()),
+            timeoutMs = 8_000,
+        )
+        if (pair == null || pair.status != 200) {
+            NodeState.update(detail = "pair failed: ${pair?.status ?: "no response"} ${pair?.body?.take(200) ?: ""}")
+            return false
+        }
+        val cookies = pair.setCookies
+        if (cookies.isEmpty()) {
+            NodeState.update(detail = "pair success without set-cookie: ${pair.body.take(200)}")
+            return false
+        }
+        val stored = withContext(Dispatchers.Main) {
+            val manager = CookieManager.getInstance()
+            for (cookie in cookies) manager.setCookie("$BASE_URL/", cookie.trim())
+            manager.flush()
+            manager.getCookie(BASE_URL)
+        }
+        if (stored == null || !verifySession(stored)) {
+            NodeState.update(detail = "cookie injection or session verify failed")
+            return false
+        }
+        NodeState.update(paired = true, detail = "WebView session paired")
+        return true
+    }    private suspend fun currentCookie(): String? = withContext(Dispatchers.Main) {
         runCatching { CookieManager.getInstance().getCookie(BASE_URL) }.getOrNull()
     }
 
@@ -1126,6 +1157,15 @@ class NodeHostService : Service() {
 
     companion object {
         const val ACTION_STOP = "com.openmausbot.test.STOP"
+
+        /** The live service, so an Activity can ask it to pair this WebView again. */
+        private var instance: NodeHostService? = null
+
+        /** Asks the live service to pair this WebView again, which a page with no session needs. */
+        fun requestPairing() {
+            instance?.pairWebView()
+        }
+
         /** The pairing label the code-hint / sessions list shows a mint slot again quickly. */
         const val CODE_LABEL = "Windows-PC-DE2F"
         private const val CHANNEL_ID = "omb-test"
@@ -1137,6 +1177,8 @@ class NodeHostService : Service() {
         private const val UI_DIR = "ui"
         private const val NODE_LIB = "libnodeexec.so"
         const val BASE_URL = "http://127.0.0.1:8799"
+        /** Minting a session the WebView then refuses would repeat forever; a person pairs by hand after this. */
+        private const val MAX_PAIRING_ATTEMPTS = 3
         private const val SKILLS_DIR = "skills"
         private const val LINUX_DIR = "linux"
 

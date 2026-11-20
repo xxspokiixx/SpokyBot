@@ -116,13 +116,27 @@ class MainActivity : Activity() {
         startForegroundService(service)
     }
 
-    private fun render(status: NodeState.Status) = when (status.phase) {
-        NodeState.Phase.Ready -> if (status.paired) attachWebView() else showBoot(describe(status), status.logTail)
-        NodeState.Phase.Failed,
-        NodeState.Phase.BundleMissing,
-        NodeState.Phase.RuntimeMissing,
-        -> showBoot(describe(status), status.logTail, failure = true)
-        else -> showBoot(describe(status), status.logTail)
+    private var sawPaired = false
+
+    private fun render(status: NodeState.Status) {
+        if (status.phase == NodeState.Phase.Ready) {
+            // Attach before pairing, not after: CookieManager drops cookies set while no WebView exists
+            // yet, so a session minted during boot was never kept. The page may open on the pairing
+            // screen; once the session is stored, it is reloaded in place.
+            attachWebView()
+            if (status.paired && !sawPaired && webView != null) {
+                sawPaired = true
+                webView?.reload()
+            }
+            return
+        }
+        when (status.phase) {
+            NodeState.Phase.Failed,
+            NodeState.Phase.BundleMissing,
+            NodeState.Phase.RuntimeMissing,
+            -> showBoot(describe(status), status.logTail, failure = true)
+            else -> showBoot(describe(status), status.logTail)
+        }
     }
 
     private fun describe(status: NodeState.Status): String {
@@ -271,6 +285,18 @@ class MainActivity : Activity() {
                 pendingDeepLink?.let { link ->
                     pendingDeepLink = null
                     dispatchDeepLink(link)
+                }
+                // The bundle is served to a page with no session too, so the page itself cannot tell
+                // it was never paired. Asking from here is what recovers a reinstall, which clears the
+                // WebView's cookies while the data folder keeps the server's sessions registry.
+                view.evaluateJavascript(
+                    "fetch('/api/auth/session',{credentials:'include'}).then(r=>r.ok?'ok':('no-'+r.status)).catch(()=>'no-net')",
+                ) { result ->
+                    // "ok" means this WebView holds a session; anything else means it needs one, and
+                    // the server's own pages cannot tell. Asking from here recovers a reinstall,
+                    // which clears the WebView's cookies while the data folder keeps the registry.
+                    val fine = result?.contains("\"ok\"") == true
+                    if (!fine && NodeState.status.value.phase == NodeState.Phase.Ready) NodeHostService.requestPairing()
                 }
                 view.evaluateJavascript(
                     "(window.ombAndroidCaps ? 'bridge:' + ombAndroidCaps.capabilitiesJson().slice(0, 60) + ' notify:' + typeof ombAndroidCaps.notify : 'bridge:MISSING')",
