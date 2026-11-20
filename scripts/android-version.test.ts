@@ -2,7 +2,7 @@
 // that made the phone reject an update over 4131082 while the fork's PRs numbered in single digits.
 import { describe, expect, it } from "vitest";
 
-import { androidVersion, commitCount, MAX_VERSION_CODE, PUBLISHED_FLOOR } from "./android-version.mjs";
+import { androidVersion, commitCount, MAX_VERSION_CODE, PUBLISHED_FLOOR, PUBLISHED_VERSION } from "./android-version.mjs";
 
 describe("the Android build number", () => {
   it("starts above every release already published", () => {
@@ -20,7 +20,21 @@ describe("the Android build number", () => {
   });
 
   it("carries the commit count in the name, so a build can be traced to its source", () => {
-    expect(androidVersion(12_345)).toEqual({ versionCode: 12_345_000, versionName: "0.12345" });
+    expect(androidVersion(12_345)).toEqual({ versionCode: 12_345_000, versionName: "0.12345.0" });
+  });
+
+  it("names a build in three parts, because the same name lands in package.json", () => {
+    // electron-builder refuses a two-part version, so an Android stamp that wrote "0.7672" broke the
+    // desktop package lane: every part must be present.
+    const { versionName } = androidVersion(7_672);
+    expect(versionName).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+
+  it("names a build above the last published release, so an update reads as newer", () => {
+    const [major, minor, patch] = androidVersion(commitCount(process.cwd())).versionName.split(".").map(Number);
+    const [publishedMajor, publishedMinor, publishedPatch] = PUBLISHED_VERSION.split(".").map(Number);
+    const older = (a: number[], b: number[]) => a[0]! - b[0]! || a[1]! - b[1]! || a[2]! - b[2]!;
+    expect(older([major!, minor!, patch!], [publishedMajor!, publishedMinor!, publishedPatch!])).toBeGreaterThan(0);
   });
 
   it("refuses a count that would ship an uninstallable APK", () => {

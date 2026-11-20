@@ -18,6 +18,9 @@ export const MAX_VERSION_CODE = 2_100_000_000;
 /** The highest code any release has published (0.4131.82). A build below it cannot install over it. */
 export const PUBLISHED_FLOOR = 4_131_082;
 
+/** The released name that code belongs to. A build's name must sort above it, as semver. */
+export const PUBLISHED_VERSION = "0.4131.82";
+
 /** Leaves room above the inherited numbering while growing once per commit. */
 const SCALE = 1_000;
 
@@ -40,5 +43,6 @@ export function androidVersion(count, floor = PUBLISHED_FLOOR) {
     );
   }
   if (versionCode > MAX_VERSION_CODE) throw new Error(`versionCode ${versionCode} exceeds the largest Play accepts`);
-  return { versionCode, versionName: `0.${count}` };
+  // Three parts: the same name lands in package.json, which electron-builder reads as semver.
+  return { versionCode, versionName: `0.${count}.0` };
 }
