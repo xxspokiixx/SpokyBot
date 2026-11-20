@@ -536,6 +536,30 @@ describe("the avatar editor", () => {
     expect(find(editor(makeBot()), "data-avatar-more").props["aria-expanded"]).toBe(false);
   });
 
+  it("keeps the 151 Pokémon behind their own collapsed section", () => {
+    click(find(editor(makeBot()), "data-avatar-more"));
+    const open = editor(makeBot());
+    // Closed, the grid is still only the ten gradients and ten Halloween bodies.
+    expect(find(open, "data-avatar-pokemon").props["aria-expanded"]).toBe(false);
+    expect(open.html).not.toContain('data-avatar-pokemon-bodies');
+    expect(open.html).toContain(">Pokémon<");
+
+    click(find(open, "data-avatar-pokemon"));
+    const withPokemon = editor(makeBot());
+    expect(find(withPokemon, "data-avatar-pokemon").props["aria-expanded"]).toBe(true);
+    // Ten gradients and ten Halloween bodies, then all 151.
+    expect(withPokemon.html.match(/aria-label="Use the /g)).toHaveLength(20 + 151);
+    click(find(withPokemon, "aria-label", "Use the Pikachu body"));
+    expect(patch).toHaveBeenLastCalledWith({ mascotBody: "pikachu" });
+  });
+
+  it("opens the Pokémon section at once for a bot wearing one", () => {
+    expect(find(editor(makeBot({ mascotBody: "pikachu" })), "data-avatar-more").props["aria-expanded"]).toBe(true);
+    const open = editor(makeBot({ mascotBody: "pikachu" }));
+    expect(find(open, "data-avatar-pokemon").props["aria-expanded"]).toBe(true);
+    expect(open.html).toContain('data-avatar-pokemon-bodies');
+  });
+
   it("switches back to the mascot when a body is picked over a picture", () => {
     const bot = makeBot({ avatarUrl: "/api/attachments/cat.webp", avatarCrop: "circle" });
     click(find(editor(bot), "data-avatar-tab", "bot"));

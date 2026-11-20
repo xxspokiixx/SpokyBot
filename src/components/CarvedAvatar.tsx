@@ -43,7 +43,7 @@ export type CarvedGeometry = {
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
 /** Every attribute the face needs for a pose. */
-export function carvedGeometry(body: HalloweenBody, p: CarvedPose): CarvedGeometry {
+export function carvedGeometry(body: Pick<HalloweenBody, "eyes">, p: CarvedPose): CarvedGeometry {
   const e = body.eyes;
   const ax = Math.abs(p.gx);
   const lean = -p.gx * 9;
@@ -135,7 +135,7 @@ export function vivid(hex: string): string {
   return `#${[ch(h + 1 / 3), ch(h), ch(h - 1 / 3)].map((v) => Math.round(v * 255).toString(16).padStart(2, "0")).join("")}`;
 }
 
-export function carvedFills(body: HalloweenBody, color: MausColor): { body: string; accent: string } {
+export function carvedFills(body: Pick<HalloweenBody, "paint"> & Partial<Pick<HalloweenBody, "bone">>, color: MausColor): { body: string; accent: string } {
   const accent = vivid(MAUS_COLORS[color] ?? MAUS_COLORS.green);
   if (body.paint === "bone") return { body: body.bone ?? "#f1ede6", accent };
   if (body.paint === "pale") return { body: mix(MAUS_COLORS[color] ?? MAUS_COLORS.green, "#ffffff", 0.86), accent };
@@ -143,7 +143,8 @@ export function carvedFills(body: HalloweenBody, color: MausColor): { body: stri
 }
 
 export type CarvedAvatarProps = {
-  body: HalloweenBodyId;
+  /** A Halloween body id, or a shape of its own: its parts already carry the colours to paint. */
+  body: HalloweenBodyId | CarvedShape;
   color: MausColor;
   faceColor?: MascotFaceColor | null;
   size?: number;
@@ -156,11 +157,19 @@ export type CarvedAvatarProps = {
   label?: string;
 };
 
+/** Any drawing the carved face can sit on: the Halloween bodies and the Pokémon bodies both arrive this way. */
+export interface CarvedShape {
+  id: string;
+  parts: ReadonlyArray<{ fill: string; d: string }>;
+  clip: string;
+  eyes: { cx: number; cy: number; dx: number; w: number; h: number; round: number; ink: string; mouth: boolean; mouthInk: string; mouthY: number | null };
+}
+
 function CarvedAvatarComponent(
   { body: bodyId, color, faceColor, size = 44, state = "idle", motion = "none", motionKey = 0, gaze, trackPointer = true, animated = true, label }: CarvedAvatarProps,
   ref: React.Ref<CursorAvatarHandle>,
 ) {
-  const body = HALLOWEEN_BODIES[bodyId];
+  const body = typeof bodyId === "string" ? HALLOWEEN_BODIES[bodyId] : bodyId;
   const faceInk = mascotFaceInk(faceColor);
   const uid = useId().replace(/:/g, "");
   const reduced = usePrefersReducedMotion();
@@ -266,9 +275,10 @@ function CarvedAvatarComponent(
   };
   const onPointerLeave = () => { cue.current.pointer = null; };
 
-  const fills = carvedFills(body, color);
-  const resolve = (fill: string) => (fill === "body" ? fills.body : fill === "accent" ? fills.accent : fill);
-  return (
+  // A Halloween body asks for its paint here; a shape of its own already carries literal colours.
+  const halloween = "paint" in body ? (body as HalloweenBody) : null;
+  const fills = halloween ? carvedFills(halloween, color) : { body: "", accent: "" };
+  const resolve = (fill: string) => (fill === "body" ? fills.body : fill === "accent" ? fills.accent : fill);  return (
     <span
       className="inline-flex shrink-0"
       onPointerMove={trackPointer && live ? onPointerMove : undefined}
