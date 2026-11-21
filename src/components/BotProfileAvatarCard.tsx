@@ -1,4 +1,5 @@
-import { ImagePlus, Loader2, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, ImagePlus, Loader2, Trash2 } from "lucide-react";
 
 import type { Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -13,7 +14,8 @@ import {
 import { BOT_AVATAR_CROPS } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, MASCOT_BODY_IDS } from "../../shared/mascot-bodies";
 import { HALLOWEEN_BODIES, HALLOWEEN_BODY_IDS } from "../../shared/halloween-bodies";
-import type { BotBodyId } from "../../shared/bot-body";
+import { POKEMON_BODIES, POKEMON_BODY_IDS } from "../../shared/pokemon-bodies";
+import { isPokemonBody, type BotBodyId } from "../../shared/bot-body";
 import { BotAvatar, MausAvatar } from "./Avatar";
 import { AvatarImageGenerator } from "./AvatarImageGenerator";
 import { AvatarFraming, OrganizationAvatarIcons, RESET_MASCOT_PATCH, useAvatarImage, type AvatarPatch } from "./avatar-editing";
@@ -32,6 +34,8 @@ export function BotProfileAvatarCard({
   onPatch: (patch: AvatarPatch) => void;
 }) {
   const { fileRef, crop, uploading, generating, setSavingConnection, busy, error, upload, removeImage, generate } = useAvatarImage(bot, onPatch);
+  // A bot already wearing one opens the section, so its own icon is not lost among 151.
+  const [pokemonOpen, setPokemonOpen] = useState(() => isPokemonBody(bot.mascotBody));
 
   return (
     <div className="overflow-hidden rounded-xl border border-hairline/40 bg-card">
@@ -180,6 +184,26 @@ export function BotProfileAvatarCard({
                 <BodyButton key={id} id={id} name={HALLOWEEN_BODIES[id].name} bot={bot} busy={busy} onPatch={onPatch} />
               ))}
             </div>
+            {/* 151 icons at once would bury the two rows above, so they get a section of their own. */}
+            <button
+              type="button"
+              data-avatar-pokemon
+              aria-expanded={pokemonOpen}
+              onClick={() => setPokemonOpen((open) => !open)}
+              className="mt-4 flex w-full items-center justify-between rounded-lg bg-inset px-3 py-2 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary hover:bg-control hover:text-ink"
+            >
+              {t("botPanel.avatar.pokemon")}
+              <ChevronDown size={14} aria-hidden="true" className={cn("transition-transform", pokemonOpen && "rotate-180")} />
+            </button>
+            {pokemonOpen && (
+              <div data-avatar-pokemon-bodies className="mt-2 max-h-[260px] overflow-y-auto">
+                <div className="grid grid-cols-5 gap-1.5">
+                  {POKEMON_BODY_IDS.map((id) => (
+                    <BodyButton key={id} id={id} name={POKEMON_BODIES[id].name} bot={bot} busy={busy} onPatch={onPatch} />
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         )}
 

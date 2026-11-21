@@ -108,7 +108,14 @@ export function WorkspaceBackupSettings() {
     setBusy(operation);
     setError(null);
     try { await work(); }
-    catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : String(cause)); }
+    catch (cause) {
+      if (!alive.current) return;
+      // A dropped connection says only "Failed to fetch", which tells the person nothing they can act on.
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setError(/^failed to fetch$/i.test(message)
+        ? t("backup.connectionLost")
+        : message);
+    }
     finally { lock.current = false; if (alive.current) setBusy(null); }
   };
 
@@ -145,13 +152,19 @@ export function WorkspaceBackupSettings() {
       id = result.id;
       if (alive.current) setUploadedId(id);
     }
-    const result: { id: string; summary: WorkspaceBackupSummary } = await api("/api/workspace-backup/preview", {
-      method: "POST", body: JSON.stringify({ id, password: importPassword }),
-    }).catch((cause: unknown) => {
-      if (cause instanceof Error && "status" in cause && cause.status === 404 && alive.current) setUploadedId(null);
+    try {
+      const result: { id: string; summary: WorkspaceBackupSummary } = await api("/api/workspace-backup/preview", {
+        method: "POST", body: JSON.stringify({ id, password: importPassword }),
+      }).catch((cause: unknown) => {
+        // The server forgets an upload whose preview it completed, so a retry needs a fresh one.
+        if (cause instanceof Error && "status" in cause && cause.status === 404 && alive.current) setUploadedId(null);
+        throw cause;
+      });
+      if (alive.current) { setPreview({ id: result.id, summary: result.summary }); setUploadedId(null); setImportPassword(""); }
+    } catch (cause) {
+      if (alive.current) setUploadedId(null);
       throw cause;
-    });
-    if (alive.current) { setPreview({ id: result.id, summary: result.summary }); setUploadedId(null); setImportPassword(""); }
+    }
   });
 
   const restoreBackup = () => perform("restore", async () => {
