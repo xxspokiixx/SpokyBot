@@ -59,6 +59,10 @@ export type CloudBackend = "box" | "vps";
 /** A place a bot can act. `cloud` covers both cloud backends. */
 export type Surface = "cloud" | "vm" | "local" | "browser";
 
+/** Where a bot works. Unset asks for a place to suit the task; "ondemand" starts in the browser and reaches a computer
+ *  only when the task is one a page cannot do. */
+export type Destination = Surface | "off" | "ondemand";
+
 export const MAUS_COLOR_NAMES = [
   "green", "blue", "red", "orange", "purple", "cyan", "pink",
   "yellow", "teal", "coral", "silver", "chrome",
@@ -310,7 +314,7 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
    * and moves with it. Navigating tasks never changes this value. */
   modelSelection: ModelSelection;
   /** where the bot works ("Works on"). Unset = auto. */
-  computer?: Surface | "off";
+  computer?: Destination;
   /** Which cloud computer backs computer: "cloud"; absent means Boat. */
   cloudBackend?: CloudBackend;
   /** Auto mode may prepare/start this bot's managed VPS container. */

@@ -76,6 +76,29 @@ describe("resolveSurface", () => {
     expect(plan.note).toMatch(/no browser and no computer/);
   });
 
+  it("On demand mounts the browser and no computer, and says when to reach for one", () => {
+    const plan = resolveSurface({ destination: "ondemand", browserOn: true });
+    expect(plan).toMatchObject({ computer: "off", browser: true, pinned: null, ondemand: true });
+    expect(plan.note).toMatch(/works on demand/);
+    expect(plan.note).toMatch(/select_computer/);
+    expect(plan.note).toMatch(/Do not open a computer for a task the browser can finish/);
+  });
+
+  it("On demand without a browser falls back to Auto rather than leaving the bot blind", () => {
+    const plan = resolveSurface({ destination: "ondemand", browserOn: false });
+    expect(plan.computer).toBeUndefined();
+    expect(plan.browser).toBe(false);
+    expect(plan.ondemand).toBeUndefined();
+    expect(plan.note).toMatch(/switched off in App Settings/);
+  });
+
+  it("a person's pin still wins over On demand", () => {
+    expect(resolveSurface({ destination: "ondemand", pinnedSurface: "local", browserOn: true }))
+      .toMatchObject({ computer: "local", pinned: "local" });
+    expect(resolveSurface({ destination: "ondemand", pinnedSurface: "browser", browserOn: true }))
+      .toMatchObject({ computer: "off", browser: true, pinned: "browser" });
+  });
+
   it("a computer destination mounts only that computer: one place per turn", () => {
     for (const destination of ["cloud", "vm", "local"] as const) {
       expect(resolveSurface({ destination, browserOn: true })).toEqual({ computer: destination, browser: false, pinned: null, note: "" });

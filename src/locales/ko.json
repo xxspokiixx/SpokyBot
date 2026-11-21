@@ -7156,5 +7156,7 @@
   "botAccess.overview.botCount.other": "봇 {count}개",
   "botAccess.overview.noBotsForPerson": "{name} 님에게는 아직 봇이 없어요.",
   "botAccess.overview.allPeople": "모든 사람",
-  "botAccess.overview.toastRemoved": "{bot}: {name} 님을 삭제했어요"
+  "botAccess.overview.toastRemoved": "{bot}: {name} 님을 삭제했어요",
+  "vm.dest.ondemand": "On demand",
+  "computer.dest.ondemandDesc": "Browser first, a computer when needed"
 }

@@ -6654,5 +6654,7 @@
   "botAccess.overview.botCount.other": "{count} 個のボット",
   "botAccess.overview.noBotsForPerson": "{name} にはまだボットがありません。",
   "botAccess.overview.allPeople": "すべてのメンバー",
-  "botAccess.overview.toastRemoved": "{bot}: {name} を削除しました"
+  "botAccess.overview.toastRemoved": "{bot}: {name} を削除しました",
+  "vm.dest.ondemand": "On demand",
+  "computer.dest.ondemandDesc": "Browser first, a computer when needed"
 }

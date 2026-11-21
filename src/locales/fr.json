@@ -2782,5 +2782,7 @@
   "botAccess.overview.botCount.other": "{count} bots",
   "botAccess.overview.noBotsForPerson": "{name} n'a pas encore de bots.",
   "botAccess.overview.allPeople": "Toutes les personnes",
-  "botAccess.overview.toastRemoved": "{bot} : {name} retiré"
+  "botAccess.overview.toastRemoved": "{bot} : {name} retiré",
+  "vm.dest.ondemand": "On demand",
+  "computer.dest.ondemandDesc": "Browser first, a computer when needed"
 }

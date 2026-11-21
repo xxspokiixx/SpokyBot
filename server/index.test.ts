@@ -3269,6 +3269,11 @@ describe("harness HTTP API", () => {
       const bot = (await api("POST", "/api/bots")).body.bot;
       botId = bot.id;
       expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "cloud" })).body.bot.computer).toBe("cloud");
+      // On demand is a place of its own, not a fallback for a browser-only bot: it stores and reads back as written.
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "ondemand" })).body.bot.computer).toBe("ondemand");
+      expect((await api("GET", "/api/bots?messages=0")).body.bots.find(
+        (candidate: { id: string }) => candidate.id === bot.id,
+      ).computer).toBe("ondemand");
 
       const auto = await api("PATCH", `/api/bots/${bot.id}`, { computer: null });
       expect(auto.status).toBe(200);

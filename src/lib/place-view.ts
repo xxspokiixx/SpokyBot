@@ -162,6 +162,7 @@ export const SIMPLE_PLACE_LABEL = {
   cloud: "place.cloud",
   vm: "vm.dest.vm",
   browser: "vm.dest.browser",
+  ondemand: "vm.dest.ondemand",
   off: "vm.dest.off",
 } as const satisfies Record<string, LocaleKey>;
 

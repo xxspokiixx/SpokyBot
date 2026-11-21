@@ -201,12 +201,12 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           patch.computer = undefined;
         } else if (
           typeof body.computer === "string" &&
-          ["cloud", "vm", "local", "browser", "off"].includes(body.computer)
+          ["cloud", "vm", "local", "browser", "ondemand", "off"].includes(body.computer)
         ) {
           requestedComputer = body.computer;
           patch.computer = body.computer;
         } else {
-          return json(res, 400, { error: "computer must be null (Auto), cloud, vm, local, browser, or off" });
+          return json(res, 400, { error: "computer must be null (Auto), cloud, vm, local, browser, ondemand, or off" });
         }
       }
       if (normalizedSelection) patch.modelSelection = normalizedSelection;

@@ -3225,5 +3225,7 @@
   "botAccess.overview.botCount.other": "Ботів: {count}",
   "botAccess.overview.noBotsForPerson": "{name}: ботів ще немає.",
   "botAccess.overview.allPeople": "Усі люди",
-  "botAccess.overview.toastRemoved": "{bot}: {name} вилучено"
+  "botAccess.overview.toastRemoved": "{bot}: {name} вилучено",
+  "vm.dest.ondemand": "On demand",
+  "computer.dest.ondemandDesc": "Browser first, a computer when needed"
 }

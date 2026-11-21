@@ -5222,5 +5222,7 @@
   "botAccess.overview.botCount.other": "{count} bot",
   "botAccess.overview.noBotsForPerson": "{name} için henüz bot yok.",
   "botAccess.overview.allPeople": "Tüm kişiler",
-  "botAccess.overview.toastRemoved": "{bot}: {name} kaldırıldı"
+  "botAccess.overview.toastRemoved": "{bot}: {name} kaldırıldı",
+  "vm.dest.ondemand": "On demand",
+  "computer.dest.ondemandDesc": "Browser first, a computer when needed"
 }

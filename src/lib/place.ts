@@ -19,6 +19,9 @@ export function localVmOffered(platform: string | undefined): boolean {
 
 export function effectivePlace(bot: Pick<Bot, "computer">, task?: Pick<Task, "surface"> | null): EffectivePlace {
   if (bot.computer === "off") return "off";
+  // On demand starts in the browser and reaches a computer only for a task a page cannot do, so until a turn pins
+  // one it is showing, and acting as, the browser.
+  if (bot.computer === "ondemand") return task?.surface ?? "browser";
   return task?.surface ?? bot.computer ?? "auto";
 }
 

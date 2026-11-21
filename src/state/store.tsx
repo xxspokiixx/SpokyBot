@@ -297,7 +297,7 @@ export interface Bot extends DefaultBotFields, Pick<WireBot, "mascotFaceColor" |
   activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead" | "parked.computer";
   turnStartedAt?: number | null;
   modelSelection: ModelSelection;
-  computer?: "cloud" | "vm" | "local" | "browser" | "off";
+  computer?: import("../../shared/wire").Destination;
   cloudBackend?: CloudBackend;
   autoStartVps?: boolean;
   vpsAlias?: string;

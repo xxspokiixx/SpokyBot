@@ -5222,5 +5222,7 @@
   "botAccess.overview.botCount.other": "{count} bot",
   "botAccess.overview.noBotsForPerson": "{name} chưa có bot nào.",
   "botAccess.overview.allPeople": "Tất cả mọi người",
-  "botAccess.overview.toastRemoved": "{bot}: đã gỡ {name}"
+  "botAccess.overview.toastRemoved": "{bot}: đã gỡ {name}",
+  "vm.dest.ondemand": "On demand",
+  "computer.dest.ondemandDesc": "Browser first, a computer when needed"
 }

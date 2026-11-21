@@ -52,7 +52,7 @@ export function usePlaceMenuItem({ bot, task, disabled = false, onPin }: {
   const effective = effectivePlace(bot, task);
   const pinned = Boolean(task?.surface);
   const off = effective === "off";
-  const botDefault = bot.computer ?? "auto";
+  const botDefault = effectivePlace(bot);
   const followsAuto = botDefault === "auto";
   const check = <Check size={14} className="text-accent" aria-hidden="true" />;
   const choose = (surface: Place | null) => { if (surface !== (task?.surface ?? null)) onPin(surface); };
@@ -123,7 +123,7 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
   }, [open]);
 
   const choose = (surface: Place | null) => { setOpen(false); if (surface !== (task?.surface ?? null)) onPin(surface); };
-  const botDefault = bot.computer ?? "auto";
+  const botDefault = effectivePlace(bot);
   const followsAuto = botDefault === "auto";
 
   return (

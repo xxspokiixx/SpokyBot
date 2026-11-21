@@ -1,4 +1,4 @@
-import type { Surface } from "../shared/wire.ts";
+import type { Destination as BotDestination, Surface } from "../shared/wire.ts";
 import { canWorkOnCloud, type CloudEngine } from "../shared/cloud-computer.ts";
 import { canUseMcpServer } from "../shared/tool-scope.ts";
 import { placeRowText, type PlaceRow, type PlaceSource } from "../shared/place-view.ts";
@@ -6,7 +6,7 @@ import { PLAIN_WORDS } from "./local-computer-guidance.ts";
 export type { Surface, PlaceSource };
 
 /** The bot's "Works on" setting; undefined = Auto. */
-export type Destination = Surface | "off" | undefined;
+export type Destination = BotDestination | undefined;
 
 export type ComputerWant = "cloud" | "vm" | "local" | "off" | undefined;
 
@@ -22,6 +22,8 @@ export interface SurfacePlan {
   note: string;
   /** A bot opened this thread, so no person watches its Screen panel: the browser is mounted beside any computer. */
   botOpened?: true;
+  /** Works on is On demand: a page does the turn unless the task needs a real computer, which the turn then reaches for. */
+  ondemand?: true;
 }
 
 const SURFACES: ReadonlySet<string> = new Set(["cloud", "vm", "local", "browser"]);
@@ -38,6 +40,11 @@ export function surfaceOfComputerKind(kind: "box" | "vps" | "vm" | "local" | nul
 
 const NO_BROWSER_NOTE =
   " This bot is set to work in the built-in browser, but the built-in browser is switched off in App Settings, so you have no browser and no computer this turn — say so instead of guessing.";
+
+/** On demand: the browser is the default, and a computer is for the tasks a page cannot do. Naming the split is what keeps
+ *  the bot from opening a desktop to read a page, and from trying to click a native app in a tab. */
+const ONDEMAND_NOTE =
+  " This bot works on demand: the built-in browser is mounted and a computer is not. Use the browser for anything a page can do — searching, reading, filling a form, comparing, booking. When the task needs a real computer (running a program, a terminal, files on disk, a native app, or a signed-in desktop session), use select_computer to reach one, then do the work there. Do not open a computer for a task the browser can finish, and do not claim a native app is reachable from a tab.";
 
 const OFF_NOTE =
   " This bot's \"Works on\" setting is Off, so no computer and no built-in browser are mounted this turn: you cannot open a page, click, or type on any screen. If the user asks for something that needs one, tell them Works on is Off in this bot's settings — never claim you are opening a browser you do not have.";
@@ -72,6 +79,13 @@ function placeOf(input: { destination: Destination; pinnedSurface?: Surface | nu
       note: " This conversation is pinned to the built-in browser, but its tools are unavailable this turn. No computer is mounted instead. Do not claim to have used it; a different place must be selected before acting there." };
   }
   if (pin) return { computer: pin, browser: beside, pinned: pin, note: "" };
+  // On demand: the browser carries the turn, and a computer is reached only when a page cannot do the job.
+  // Without a browser there is nothing to start from, so it behaves as Auto rather than leaving the bot blind.
+  if (destination === "ondemand") {
+    return browserOn
+      ? { computer: "off", browser: true, pinned: null, note: ONDEMAND_NOTE, ondemand: true }
+      : { computer: undefined, browser: false, pinned: null, note: NO_BROWSER_NOTE };
+  }
   if (destination === "browser") {
     return browserOn
       ? { computer: "off", browser: true, pinned: null, note: "" }
@@ -174,7 +188,7 @@ const CLOUD_HOME_WORDING: ReadonlyArray<readonly [string, string]> = [
 /** Built from what was actually mounted, never from the setting, so the model is only told about tools it can call. */
 export function surfacePrompt(
   mounted: MountedSurfaces,
-  opts: { pinned?: Surface | null; note?: string; canSelect?: boolean; cloudHome?: boolean; botOpened?: boolean } = {},
+  opts: { pinned?: Surface | null; note?: string; canSelect?: boolean; cloudHome?: boolean; botOpened?: boolean; ondemand?: boolean } = {},
 ): string {
   const reportBack = opts.botOpened && !opts.canSelect;
   const computer = mounted.computer ? surfaceLabel(mounted.computer) : null;
@@ -190,8 +204,9 @@ export function surfacePrompt(
     text =
       ` Everything you do on screen happens on ${computer}, web pages included, through its own browser; there is no separate built-in browser this turn. If you need the user to sign in, tell them it is on ${computer}.`;
   } else if (mounted.browser) {
-    text =
-      " Everything you do on screen happens in the built-in browser tab; there is no desktop, file or shell computer this turn. If you need the user to sign in, tell them it is in the Browser tab of the Screen panel.";
+    text = opts.ondemand
+      ? " The built-in browser is mounted and no computer is; this bot works on demand, so a page carries the turn and a computer is reached only when the task needs one."
+      : " Everything you do on screen happens in the built-in browser tab; there is no desktop, file or shell computer this turn. If you need the user to sign in, tell them it is in the Browser tab of the Screen panel.";
   }
   if (text) text += RESTATE_SENTENCE + (opts.canSelect
     ? SURFACE_AUTHORITY.replace(ASK_TO_SWITCH, "inspect connected choices with select_computer and select the requested available place; on a pending result end this turn so OpenMausBot can reconnect the correct tools and continue the original request")

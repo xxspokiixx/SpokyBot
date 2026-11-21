@@ -5,7 +5,7 @@ import { Switch } from "./SettingsPrimitives";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { waitForLocalVmReady } from "@/lib/local-vm-readiness";
-import { CalendarClock, ChevronRight, Columns2, Box, Check, Cloud, Sparkles, Globe, Hand, Loader2, Maximize2, Monitor, Moon, Power, Settings, X } from "lucide-react";
+import { CalendarClock, ChevronRight, Columns2, Box, Check, Cloud, Sparkles, Globe, Hand, Loader2, Maximize2, Monitor, Moon, Power, Settings, X, Zap } from "lucide-react";
 import { api, ApiError, currentTaskBot, useStore, type Bot, type ConfigStatus } from "@/state/store";
 import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { ComputerFilesPane } from "./ComputerFilesPane";
@@ -28,6 +28,10 @@ import { usePanelPage, type PanelPage } from "@/lib/page-open";
 const DataPanel = lazy(() => import("./data/DataPanel").then((module) => ({ default: module.DataPanel })));
 const loadLiveDesktop = () => import("./LiveDesktop").then((module) => ({ default: module.LiveDesktop }));
 const LiveDesktop = lazy(loadLiveDesktop);
+/** Whether this destination starts in the browser tab: the browser-only place, and on demand, which reaches a computer
+ *  only when a task needs one. */
+const startsInBrowser = (destination: Bot["computer"] | null | undefined): boolean =>
+  destination === "browser" || destination === "ondemand";
 const loadLocalDesktopPreview = () => import("./LocalDesktopPreview").then((module) => ({ default: module.LocalDesktopPreview }));
 const LocalDesktopPreview = lazy(loadLocalDesktopPreview);
 import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled } from "@/lib/feature-flags";
@@ -316,10 +320,10 @@ export function ComputerPanel({
   const panelTargetKey = `${profileBot.id}:${profileBot.threadId}:${livePlace}:${profileBot.cloudBackend ?? "box"}`;
   useEffect(() => {
     const previous = previousPanelTarget.current;
-    if (previous === panelTargetKey && (explicitPanelView.current || !(bot.computer === "browser" && browserEnabled))) return;
+    if (previous === panelTargetKey && (explicitPanelView.current || !(startsInBrowser(bot.computer) && browserEnabled))) return;
     if (previous !== panelTargetKey) explicitPanelView.current = false;
     previousPanelTarget.current = panelTargetKey;
-    setPanelView(bot.computer === "browser" && browserEnabled ? "browser"
+    setPanelView(startsInBrowser(bot.computer) && browserEnabled ? "browser"
       : previous === null ? readComputerPanelView(bot.id) : "computer");
   }, [panelTargetKey, bot.id, bot.computer, browserEnabled]);
 
@@ -410,7 +414,7 @@ export function ComputerPanel({
       setPhase("off");
       return;
     }
-    if (bot.computer === "browser") {
+    if (startsInBrowser(bot.computer)) {
       setPhase("browser");
       return;
     }
@@ -1177,25 +1181,27 @@ export function ComputerPanel({
     : undefined;
   const cloudView = viewOf("cloud", cloudRefused);
   const autoView = viewOf("auto");
+  const browserView = viewOf("browser");
   const placeOptions = ([
     [null, "vm.dest.auto", "computer.dest.autoDesc", Sparkles],
     ["cloud", "place.cloud", "computer.dest.cloudDesc", Cloud],
     ["vm", "vm.dest.vm", "computer.dest.vmDesc", Box],
     ["local", "vm.dest.local", "computer.dest.localDesc", Monitor],
     ["browser", "vm.dest.browser", "computer.dest.browserDesc", Globe],
+    ["ondemand", "vm.dest.ondemand", "computer.dest.ondemandDesc", Zap],
     ["off", "vm.dest.off", "computer.dest.offDesc", Power],
-  ] as const).filter(([mode]) => mode === null || mode === "off" || (placeOffered(mode, state.config)
+  ] as const).filter(([mode]) => mode === null || mode === "off" || mode === "ondemand" || (placeOffered(mode, state.config)
     && !(mode === "local" && capabilities.localComputer.reasonCode === "remote-server")
     && !(mode === "vm" && !localVmOffered(capabilities.host.platform)))).map(([mode, labelKey, descriptionKey, Icon]) => {
     const selected = mode === null ? !profileBot.computer : profileBot.computer === mode;
     const managedKind = mode === "local" ? "thisComputer" : mode === "vm" ? "localVm" : mode === "cloud" ? (profileBot.cloudBackend === "vps" ? "vps" : "box") : null;
     const managedBy = managedPolicy && managedKind && !managedPolicy.computers[managedKind] ? t("policy.managedBy", { organization: managedPolicy.organizationName }) : undefined;
-    const view = mode === null ? autoView : mode === "cloud" ? cloudView : viewOf(mode);
+    // On demand starts in the browser, so it reports the browser's state until a turn reaches a computer.
+    const view = mode === null ? autoView : mode === "cloud" ? cloudView : mode === "ondemand" ? browserView : viewOf(mode);
     const disabled = Boolean(managedBy) || placeBlocked(view);
     const issue = !managedBy && placeHasIssue(view);
-    const unavailableTitle = managedBy ?? (issue ? view.line : mode === "browser" ? t("computer.browserOnlyTitle") : undefined);
-    return { mode, labelKey, descriptionKey, Icon, simpleLabel: worksOnSimpleLabel(mode ?? undefined, capabilities.host.platform), selected, managedBy, disabled, unavailableTitle, view, issue };
-  });
+    const unavailableTitle = managedBy ?? (issue ? view.line : mode === "browser" || mode === "ondemand" ? t("computer.browserOnlyTitle") : undefined);
+    return { mode, labelKey, descriptionKey, Icon, simpleLabel: worksOnSimpleLabel(mode ?? undefined, capabilities.host.platform), selected, managedBy, disabled, unavailableTitle, view, issue };  });
   const worksOnView = placeOptions.find(({ selected }) => selected)?.view ?? autoView;
   const runPlaceAction = (id: PlaceActionId) => {
     if (id === "start" || id === "wake") return startCloudComputer();
@@ -1218,6 +1224,8 @@ export function ComputerPanel({
       setLocalAutoWarningTarget(bot.id);
     }
     else if (mode === "browser") updateComputerSelection({ computer: mode, browser: true });
+    // On demand runs in the built-in browser until a task needs a computer, so the browser must be on too.
+    else if (mode === "ondemand") updateComputerSelection({ computer: mode, browser: true });
     else updateComputerSelection({ computer: mode });
   };
   const heldPin = liveTask?.surface && !liveTask.surfaceAuto && profileBot.computer !== "off"
@@ -1872,7 +1880,7 @@ export function ComputerPanel({
                   data-testid="place-unpin"
                 >
                   {t("place.unpinSimple", {
-                    place: placeOptions.find(({ selected }) => selected)?.simpleLabel ?? t(placeLabelKey(profileBot.computer ?? "auto")),
+                    place: placeOptions.find(({ selected }) => selected)?.simpleLabel ?? t(placeLabelKey(effectivePlace(profileBot))),
                   })}
                 </button>
               </div>

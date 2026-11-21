@@ -2782,5 +2782,7 @@
   "botAccess.overview.botCount.other": "{count} बॉट",
   "botAccess.overview.noBotsForPerson": "{name} के पास अभी कोई बॉट नहीं है।",
   "botAccess.overview.allPeople": "सभी लोग",
-  "botAccess.overview.toastRemoved": "{bot}: {name} को हटाया"
+  "botAccess.overview.toastRemoved": "{bot}: {name} को हटाया",
+  "vm.dest.ondemand": "On demand",
+  "computer.dest.ondemandDesc": "Browser first, a computer when needed"
 }

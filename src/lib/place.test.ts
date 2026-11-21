@@ -12,6 +12,15 @@ describe("where a conversation works", () => {
     expect(effectivePlace({ computer: undefined }, undefined)).toBe("auto");
   });
 
+  it("shows an On demand bot in the browser until a turn pins the computer it had to reach", () => {
+    expect(effectivePlace({ computer: "ondemand" })).toBe("browser");
+    expect(effectivePlace({ computer: "ondemand" }, null)).toBe("browser");
+    expect(effectivePlace({ computer: "ondemand" }, { surface: "local" })).toBe("local");
+    expect(effectivePlace({ computer: "ondemand" }, { surface: "vm" })).toBe("vm");
+    // Off still wins over On demand: no computer and no browser.
+    expect(effectivePlace({ computer: "off" }, { surface: "browser" })).toBe("off");
+  });
+
   it("offers every place on a desktop or self-hosted server, and no this computer or Local VM on an OMB Cloud home", () => {
     for (const config of [null, undefined, {}, { cloudHome: false }]) {
       expect(PLACES.filter((place) => placeOffered(place, config))).toEqual(["cloud", "vm", "local", "browser"]);

@@ -4613,5 +4613,7 @@
   "botAccess.overview.botCount.other": "{count} 個機器人",
   "botAccess.overview.noBotsForPerson": "{name} 還沒有機器人。",
   "botAccess.overview.allPeople": "所有人員",
-  "botAccess.overview.toastRemoved": "{bot}：已移除 {name}"
+  "botAccess.overview.toastRemoved": "{bot}：已移除 {name}",
+  "vm.dest.ondemand": "On demand",
+  "computer.dest.ondemandDesc": "Browser first, a computer when needed"
 }

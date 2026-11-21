@@ -17,7 +17,7 @@ import type { SimplePageId } from "./page-registry";
 import { Card, NavRow, RadioRow } from "./rows";
 
 type Derived = ReturnType<typeof useBotSettingsDerived>;
-type PlaceChoice = "auto" | Place | "off";
+type PlaceChoice = "auto" | Place | "off" | "ondemand";
 
 interface PlaceOption {
   value: PlaceChoice;
@@ -28,6 +28,7 @@ interface PlaceOption {
 
 const EXTRA_PLACE_LABEL: Record<Exclude<PlaceChoice, "auto" | "local" | "cloud" | "browser">, () => string> = {
   vm: () => t("place.vm"),
+  ondemand: () => t("vm.dest.ondemand"),
   off: () => t("place.off"),
 };
 
@@ -71,13 +72,17 @@ function usePlaceChoices(bot: Bot) {
     { value: "auto", label: t("computer.simple.dest.letItChoose") },
     ...(placeViews.local.policy ? [choice("local")] : []),
     ...(placeViews.browser.policy || current === "browser" ? [choice("browser")] : []),
+    // On demand runs in the built-in browser, so it follows the browser's availability.
+    ...(placeViews.browser.policy || current === "ondemand"
+      ? [{ value: "ondemand" as const, label: EXTRA_PLACE_LABEL.ondemand(), disabled: !placeViews.browser.policy && current !== "ondemand" }]
+      : []),
     ...(placeViews.cloud.policy ? [choice("cloud")] : []),
     ...(localVmOffered(platform) && (current === "vm" || current === "off") ? [{ value: current, label: EXTRA_PLACE_LABEL[current](), disabled: true }] : []),
   ];
   const liveSurface = bot.tasks?.find((task) => task.threadId === bot.threadId)?.surface;
   const usingNow = liveSurface && liveSurface !== current ? placeLabel(liveSurface) : null;
   const currentLabel = options.find((option) => option.value === current)?.label
-    ?? (current === "auto" || (current === "vm" && !localVmOffered(platform)) || current === "off" ? undefined : placeLabel(current));
+    ?? (current === "auto" || current === "ondemand" || (current === "vm" && !localVmOffered(platform)) || current === "off" ? undefined : placeLabel(current));
   return { options, current, currentLabel, usingNow };
 }
 
