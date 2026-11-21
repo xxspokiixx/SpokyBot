@@ -137,7 +137,11 @@ if (existsSync(join(linuxRuntime, "rootfs.tar.gz"))) {
       : join(linuxRuntime, name);
     const target = name === "rootfs.tar.gz" ? join(linuxTarget, "rootfs.blob") : join(linuxTarget, name);
     if (source && existsSync(source)) {
-      copyFileSync(source, target);
+      // A shell script with CRLF line endings makes bash read "set -e\r" and answer "illegal option -", which is how
+      // the graphical desktop failed to set up on the tablet. The checkout should already be LF; this makes it true
+      // whatever machine staged the assets.
+      if (name.endsWith(".sh")) writeFileSync(target, readFileSync(source, "utf8").replace(/\r\n/gu, "\n"));
+      else copyFileSync(source, target);
     }
   }
   copyFileSync(linuxMcp, join(linuxTarget, "android-local-computer.mjs"));
