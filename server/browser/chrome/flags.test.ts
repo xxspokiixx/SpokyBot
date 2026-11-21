@@ -23,10 +23,16 @@ describe("Chrome's command line", () => {
     expect(() => chromeArgs({ userDataDir: "/p", mode: "headless", host: "desktop", userAgent: "x\ny" })).toThrow(/line break/);
   });
 
-  it("gives the phone a DevTools port, since proot cannot carry the pipe's extra descriptors", () => {
-    const phone = chromeArgs({ userDataDir: "/data/browser/profiles/abc", mode: "headless", host: "desktop", platform: "android", userAgent: UA });
+  it("gives the phone's guest Chrome a DevTools port, since proot cannot carry the pipe's extra descriptors", () => {
+    const phone = chromeArgs({ userDataDir: "/data/browser/profiles/abc", mode: "headless", host: "desktop", guestShell: true, userAgent: UA });
     expect(phone).toContain("--remote-debugging-port=0");
     expect(phone.filter((arg) => arg.startsWith("--remote-debugging"))).toEqual(["--remote-debugging-port=0"]);
+  });
+
+  it("keeps the phone off /dev/shm, which proot replaces with one that has none", () => {
+    const phone = chromeArgs({ userDataDir: "/p", mode: "headless", host: "desktop", guestShell: true, userAgent: UA });
+    expect(phone).toContain("--disable-dev-shm-usage");
+    expect(headless).not.toContain("--disable-dev-shm-usage");
   });
 
   it("gives headless the real display in device pixels, and a window nothing headless-only", () => {

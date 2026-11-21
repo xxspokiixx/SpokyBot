@@ -100,7 +100,7 @@ function handshake(transport: CdpTransport, exited: Promise<ChromeExit>, timeout
 
 /** Chrome on the phone reports its DevTools endpoint in the profile folder, since proot cannot carry the pipe's
  *  extra descriptors. The first line is the port, the second the browser target's path. */
-async function devToolsPortTransport(userDataDir: string, exited: Promise<ChromeExit>, timeoutMs: number): Promise<CdpTransport> {
+async function devToolsPortTransport(userDataDir: string, exited: Promise<ChromeExit>, timeoutMs: number, output: () => string): Promise<CdpTransport> {
   const file = join(userDataDir, "DevToolsActivePort");
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -115,26 +115,38 @@ async function devToolsPortTransport(userDataDir: string, exited: Promise<Chrome
     }
     if (Date.now() > deadline) throw new Error("Chrome did not open its DevTools port in time.");
     await Promise.race([
-      exited.then((exit) => { throw new Error(`Chrome exited before opening its DevTools port (${exit.signal ?? `code ${exit.code}`}).`); }),
+      exited.then((exit) => { throw new Error(`Chrome exited before opening its DevTools port (${exit.signal ?? `code ${exit.code}`}): ${tail(output())}`); }),
       new Promise((resolve) => setTimeout(resolve, 250)),
     ]);
   }
 }
+
+/** The end of what Chrome printed, on one line, for an error a person may read. */
+function tail(output: string): string {
+  const lines = output.split("\n").map((line) => line.trim()).filter(Boolean);
+  return lines.slice(-12).join(" | ").slice(-1200) || "it printed nothing";
+}
 export async function launchChrome(options: LaunchOptions): Promise<ChromeProcess> {
-  // On the phone the browser is the guest's own Chromium, reached through proot: the wrapper cannot
-  // carry the extra descriptors Chrome's DevTools pipe rides on, so the launch names a loopback port
-  // instead, and the profile is addressed by the guest's name for it.
+  // On the phone the browser is the guest's own Chromium, entered through a wrapper that proots into it. Its
+  // DevTools pipe cannot cross proot, so the launch names a loopback port instead.
   const phone = androidGuest(options.env ?? process.env);
-  const profileDir = phone ? guestWorkspacePath(options.userDataDir, options.env ?? process.env) : options.userDataDir;
-  const argv = chromeArgs({ ...options, userDataDir: profileDir });
+  const launch = guestInvocation(options.executablePath, [], options.env ?? process.env);
+  // The phone's wrapper enters the guest by itself and binds the app's files dir at its own path, so a profile
+  // named the way this computer names it is that same folder inside the guest, and the port file it writes is
+  // readable from here. A guest binary this code wraps itself sees only the mounts, so its profile is named by
+  // the mount instead.
+  const profileDir = phone && launch.command !== options.executablePath
+    ? guestWorkspacePath(options.userDataDir, options.env ?? process.env)
+    : options.userDataDir;
+  const argv = chromeArgs({ ...options, userDataDir: profileDir, guestShell: Boolean(phone) });
   const env = chromeEnv(options.env ?? process.env, {
     host: options.host,
     timezone: options.timezone ?? null,
     sandboxHelper: options.sandboxHelper ?? null,
     profileMarker: options.profileMarker ?? null,
   });
-  const launch = guestInvocation(options.executablePath, argv, options.env ?? process.env);
-  const child = spawnBotWork(() => spawn(launch.command, launch.args, { stdio: ["ignore", "pipe", "pipe", "pipe", "pipe"], env: launch.env, windowsHide: true }));
+  const spawned = guestInvocation(options.executablePath, argv, options.env ?? process.env);
+  const child = spawnBotWork(() => spawn(spawned.command, spawned.args, { stdio: ["ignore", "pipe", "pipe", "pipe", "pipe"], env: spawned.env, windowsHide: true }));
   let output = "";
   const keep = (chunk: Buffer) => {
     output = (output + chunk.toString("utf8")).slice(-OUTPUT_LIMIT);
@@ -150,9 +162,8 @@ export async function launchChrome(options: LaunchOptions): Promise<ChromeProces
   });
   const pid = child.pid;
   if (pid !== undefined) void exited.then(() => options.registry?.remove(pid));
-  const onPhone = launch.command !== options.executablePath;
-  const transport = onPhone
-    ? await devToolsPortTransport(options.userDataDir, exited, options.handshakeTimeoutMs ?? 60_000)
+  const transport = phone
+    ? await devToolsPortTransport(options.userDataDir, exited, options.handshakeTimeoutMs ?? 60_000, () => output)
     : pipeTransport(child.stdio[3] as Writable, child.stdio[4] as Readable);
   let version: BrowserVersion;
   try {

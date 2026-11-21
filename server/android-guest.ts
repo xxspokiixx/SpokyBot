@@ -9,7 +9,7 @@
 // them. This wraps an engine the same way, so a glibc CLI starts on a phone exactly as it does in
 // the guest.
 import { existsSync } from "node:fs";
-import { join, sep } from "node:path";
+import { basename, join, sep } from "node:path";
 
 /** The guest paths a wrapped engine needs to find its own files and its config. */
 export interface AndroidGuestConfig {
@@ -55,11 +55,17 @@ function isAbsolutePath(path: string): boolean {
   return path.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(path);
 }
 
+/** Binaries the phone runs natively, which the guest cannot run and must not wrap. The app's own Node is a bionic
+ *  build; `omb-guest-chromium` is a wrapper that enters the guest by itself, so wrapping it nests proot inside proot
+ *  and proot answers "No such file or directory" for a file that is right there. */
+const ANDROID_NATIVE = new Set(["libnodeexec.so", "omb-guest-chromium"]);
+
 /** The command to run for `executable`, wrapped when this is the phone and it is a guest build.
  *  Anything else gets the binary untouched, so every desktop path stays exactly as it was. */
 export function guestInvocation(executable: string, args: string[], env: NodeJS.ProcessEnv = process.env): WrappedCommand {
   const guest = androidGuest(env);
   if (!guest || !isAbsolutePath(executable)) return { command: executable, args, env };
+  if (ANDROID_NATIVE.has(basename(executable))) return { command: executable, args, env };
   // Only an installed or staged engine is a guest build; the app's own Node is not.
   if (!existsSync(executable)) return { command: executable, args, env };
   return guestCommandFor(guest, executable, args, env);

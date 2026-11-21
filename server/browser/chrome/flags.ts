@@ -54,6 +54,9 @@ export interface ChromeFlagsInput {
   mode: BrowserMode;
   host: HostKind;
   platform?: NodeJS.Platform;
+  /** True when this Chrome runs behind proot on the phone: its DevTools pipe cannot reach it there, and proot
+   *  replaces /dev with one that has no shm. */
+  guestShell?: boolean;
   /** The calibrated headed user agent; headless only. */
   userAgent?: string | null;
   /** The display pages see; headless only (a window has the real one). */
@@ -91,7 +94,7 @@ export function chromeArgs(input: ChromeFlagsInput): string[] {
   const args = [
     // The phone's Chrome runs behind proot, which does not carry Chrome's extra descriptors, so the
     // DevTools pipe never reaches it there. A loopback port is what the guest can open a socket to.
-    ...(platform === "android" ? ["--remote-debugging-port=0"] : ["--remote-debugging-pipe"]),
+    ...(input.guestShell ? ["--remote-debugging-port=0"] : ["--remote-debugging-pipe"]),
     `--user-data-dir=${input.userDataDir}`,
     ...(headless ? ["--headless=new"] : []),
     "--no-first-run",
@@ -116,7 +119,9 @@ export function chromeArgs(input: ChromeFlagsInput): string[] {
   // headless never shows: about 50 MB per browser.
   if (headless) args.push("--mute-audio", "--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIReloadButton");
   if (input.host !== "desktop") args.push("--disk-cache-size=52428800");
-  if (input.host === "container") args.push("--disable-dev-shm-usage");
+  // A container and the phone both leave Chrome without a usable /dev/shm: the container's is 64 MB, and
+  // proot binds the host's /dev, which has no shm at all. Chrome aborts at startup on either.
+  if (input.host === "container" || input.guestShell) args.push("--disable-dev-shm-usage");
   if (input.sandbox === false) args.push("--no-sandbox");
   if (input.startUrl !== null) args.push(input.startUrl ?? "about:blank");
   return args;
