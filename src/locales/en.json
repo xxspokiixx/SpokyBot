@@ -4011,6 +4011,7 @@
   "botPanel.avatar.halloween": "Halloween",
   "botPanel.avatar.pokemon": "Pokémon",
   "botPanel.avatar.sprites": "Sprites",
+  "botPanel.avatar.digimon": "Digimon",
   "botPanel.avatar.spriteFailed": "That sprite could not be loaded. Check the connection and try again.",
   "botPanel.avatar.more": "More looks",
   "botPanel.avatar.costume": "Dressed as the {name} while the Halloween skin is on",

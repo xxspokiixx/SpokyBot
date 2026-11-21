@@ -15,6 +15,7 @@ import { BOT_AVATAR_CROPS } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, MASCOT_BODY_IDS } from "../../shared/mascot-bodies";
 import { HALLOWEEN_BODIES, HALLOWEEN_BODY_IDS } from "../../shared/halloween-bodies";
 import { POKEMON_BODIES, POKEMON_BODY_IDS } from "../../shared/pokemon-bodies";
+import { DIGIMON_SPRITES } from "../../shared/digimon-sprites";
 import { isPokemonBody, type BotBodyId } from "../../shared/bot-body";
 import { BotAvatar, MausAvatar } from "./Avatar";
 import { AvatarImageGenerator } from "./AvatarImageGenerator";
@@ -37,18 +38,23 @@ export function BotProfileAvatarCard({
   // A bot already wearing one opens the section, so its own icon is not lost among 151.
   const [pokemonOpen, setPokemonOpen] = useState(() => isPokemonBody(bot.mascotBody));
   const [spritesOpen, setSpritesOpen] = useState(false);
+  const [digimonOpen, setDigimonOpen] = useState(false);
 
-  /** A sprite is a picture, so it travels the same way an uploaded image does: stored once, then named by the bot. */
-  const useSprite = async (number: number) => {
+  /** A picture travels the way an uploaded image does: stored once, then named by the bot. */
+  const usePicture = async (url: string, filename: string) => {
     try {
-      const response = await fetch(`/pokemon/${number}.png`);
+      const response = await fetch(url);
       if (!response.ok) throw new Error(t("botPanel.avatar.spriteFailed"));
       const blob = await response.blob();
-      await upload(new File([blob], `pokemon-${number}.png`, { type: "image/png" }));
+      const type = url.endsWith(".gif") ? "image/gif" : "image/png";
+      await upload(new File([blob], filename, { type }));
     } catch {
-      // upload() reports its own failures; a failed fetch means the sprite never arrived.
+      // upload() reports its own failures; a failed fetch means the picture never arrived.
     }
   };
+
+  /** The animated sprite when there is one, so the icon the bot keeps is the moving one. */
+  const useSprite = (number: number) => void usePicture(`/pokemon/animated/${number}.gif`, `pokemon-${number}.gif`);
 
   return (
     <div className="overflow-hidden rounded-xl border border-hairline/40 bg-card">
@@ -242,14 +248,51 @@ export function BotProfileAvatarCard({
                       onClick={() => void useSprite(POKEMON_BODIES[id].number)}
                       className="flex items-center justify-center rounded-lg py-1.5 hover:bg-control/60 disabled:opacity-50 [image-rendering:pixelated]"
                     >
+                      {/* The animated set is the same picture in motion; a slow connection falls back to the still frame. */}
                       <img
-                        src={`/pokemon/${POKEMON_BODIES[id].number}.png`}
+                        src={`/pokemon/animated/${POKEMON_BODIES[id].number}.gif`}
+                        onError={(event) => {
+                          const image = event.currentTarget;
+                          if (!image.dataset.still) { image.dataset.still = "1"; image.src = `/pokemon/${POKEMON_BODIES[id].number}.png`; }
+                        }}
                         alt=""
                         width={34}
                         height={34}
                         draggable={false}
+                        loading="lazy"
                         className="size-[34px] object-contain [image-rendering:pixelated]"
                       />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* The Digimon API has portraits rather than game sprites, so they sit in a section of their own. */}
+            <button
+              type="button"
+              data-avatar-digimon
+              aria-expanded={digimonOpen}
+              onClick={() => setDigimonOpen((open) => !open)}
+              className="mt-2 flex w-full items-center justify-between rounded-lg bg-inset px-3 py-2 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary hover:bg-control hover:text-ink"
+            >
+              {t("botPanel.avatar.digimon")}
+              <ChevronDown size={14} aria-hidden="true" className={cn("transition-transform", digimonOpen && "rotate-180")} />
+            </button>
+            {digimonOpen && (
+              <div data-avatar-digimon-bodies className="mt-2 max-h-[280px] overflow-y-auto">
+                <div className="grid grid-cols-5 gap-1.5">
+                  {DIGIMON_SPRITES.map((digimon) => (
+                    <button
+                      key={digimon.slug}
+                      type="button"
+                      disabled={busy}
+                      aria-label={`Use the ${digimon.name} Digimon`}
+                      title={digimon.name}
+                      onClick={() => void usePicture(`/digimon/${digimon.slug}.png`, `digimon-${digimon.slug}.png`)}
+                      className="flex items-center justify-center rounded-lg py-1.5 hover:bg-control/60 disabled:opacity-50"
+                    >
+                      <img src={`/digimon/${digimon.slug}.png`} alt="" width={34} height={34} draggable={false} loading="lazy" className="size-[34px] object-contain" />
                     </button>
                   ))}
                 </div>

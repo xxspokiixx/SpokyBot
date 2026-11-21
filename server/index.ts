@@ -448,6 +448,8 @@ import { loginSite } from "../shared/logins.ts";
 import { browserRestartRefusal } from "./browser-live.ts";
 import { browserEngineStatus } from "./browser-engine.ts";
 import { chromeLauncher } from "./browser/chrome/launcher.ts";
+import { androidGuest } from "./android-guest.ts";
+import { ensureGuestChromium, guestChromiumReady } from "./android-chromium.ts";
 import { createBrowserHost } from "./host/browser.ts";
 import { createScreenFrameSource, rememberTurnFrame, type ScreenCapture } from "./screen-frame-source.ts";
 import { screenFrameHash, screenSurfaceForTool, screenTouchingTool, settledFrameIsNews } from "./screen-frame-gate.ts";
@@ -15761,7 +15763,17 @@ server.listen(PORT, "127.0.0.1", async () => {
   companyRuntimeReady();
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
   browserSweep.start(); startCloudTeamPolicy({ cloudHome: CLOUD_HOME, dataDir: DATA_DIR, managed: managedPolicy, sessions }); moveFreeze.hold(() => appTriggers.start(), () => void appTriggers.stop()); startCloudHomeConnectedApps({ cloudHome: CLOUD_HOME !== null, dataDir: DATA_DIR, cloudGrant: CLOUD_ENV.OMB_CLOUD_CONNECTED_APPS_GRANT, apply: (access) => { composio.setManagedBrokerAccess(access); broadcast({ kind: "config", ...configStatus() }); } });
-  void afterFirstEngineRead().then(() => { if (builtInBrowserEnabled(cfg)) chromeLauncher.start(); });
+  void afterFirstEngineRead().then(() => {
+    if (!builtInBrowserEnabled(cfg)) return;
+    // The phone's rootfs carries no browser, and no APK should carry 300 MB of one: it is fetched
+    // once on the device, then the launcher starts against it.
+    const guest = androidGuest();
+    if (guest && !guestChromiumReady(guest)) {
+      void ensureGuestChromium(guest, (line) => console.log(line)).then((ready) => { if (ready) chromeLauncher.start(); });
+      return;
+    }
+    chromeLauncher.start();
+  });
   followupsReady = true;
   drainQueuedSends();
   drainQueuedChannelSends();
