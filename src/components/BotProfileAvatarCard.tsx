@@ -36,6 +36,19 @@ export function BotProfileAvatarCard({
   const { fileRef, crop, uploading, generating, setSavingConnection, busy, error, upload, removeImage, generate } = useAvatarImage(bot, onPatch);
   // A bot already wearing one opens the section, so its own icon is not lost among 151.
   const [pokemonOpen, setPokemonOpen] = useState(() => isPokemonBody(bot.mascotBody));
+  const [spritesOpen, setSpritesOpen] = useState(false);
+
+  /** A sprite is a picture, so it travels the same way an uploaded image does: stored once, then named by the bot. */
+  const useSprite = async (number: number) => {
+    try {
+      const response = await fetch(`/pokemon/${number}.png`);
+      if (!response.ok) throw new Error(t("botPanel.avatar.spriteFailed"));
+      const blob = await response.blob();
+      await upload(new File([blob], `pokemon-${number}.png`, { type: "image/png" }));
+    } catch {
+      // upload() reports its own failures; a failed fetch means the sprite never arrived.
+    }
+  };
 
   return (
     <div className="overflow-hidden rounded-xl border border-hairline/40 bg-card">
@@ -200,6 +213,44 @@ export function BotProfileAvatarCard({
                 <div className="grid grid-cols-5 gap-1.5">
                   {POKEMON_BODY_IDS.map((id) => (
                     <BodyButton key={id} id={id} name={POKEMON_BODIES[id].name} bot={bot} busy={busy} onPatch={onPatch} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* The original game sprites: a picture of the creature, not a shape wearing the mascot's face. */}
+            <button
+              type="button"
+              data-avatar-sprites
+              aria-expanded={spritesOpen}
+              onClick={() => setSpritesOpen((open) => !open)}
+              className="mt-2 flex w-full items-center justify-between rounded-lg bg-inset px-3 py-2 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary hover:bg-control hover:text-ink"
+            >
+              {t("botPanel.avatar.sprites")}
+              <ChevronDown size={14} aria-hidden="true" className={cn("transition-transform", spritesOpen && "rotate-180")} />
+            </button>
+            {spritesOpen && (
+              <div data-avatar-sprite-bodies className="mt-2 max-h-[280px] overflow-y-auto">
+                <div className="grid grid-cols-5 gap-1.5">
+                  {POKEMON_BODY_IDS.map((id) => (
+                    <button
+                      key={id}
+                      type="button"
+                      disabled={busy}
+                      aria-label={`Use the original ${POKEMON_BODIES[id].name} sprite`}
+                      title={POKEMON_BODIES[id].name}
+                      onClick={() => void useSprite(POKEMON_BODIES[id].number)}
+                      className="flex items-center justify-center rounded-lg py-1.5 hover:bg-control/60 disabled:opacity-50 [image-rendering:pixelated]"
+                    >
+                      <img
+                        src={`/pokemon/${POKEMON_BODIES[id].number}.png`}
+                        alt=""
+                        width={34}
+                        height={34}
+                        draggable={false}
+                        className="size-[34px] object-contain [image-rendering:pixelated]"
+                      />
+                    </button>
                   ))}
                 </div>
               </div>
