@@ -627,7 +627,8 @@ export class BrowserLive {
       try { status = await this.command(viewer, ["stream", "enable"]); }
       catch (error) {
         if (error instanceof BrowserBusyError) throw error;
-        status = await this.command(viewer, ["stream", "status"]);
+        // A slow host — the phone's guest among them — answers this read later than the probe's own budget.
+        status = await this.command(viewer, ["stream", "status"], COMMAND_TIMEOUT_MS);
       }
     }
     const port = browserStreamPort(status);
