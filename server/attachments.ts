@@ -1,15 +1,18 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
+  copyFileSync,
   createReadStream,
+  existsSync,
   linkSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { link, open, unlink } from "node:fs/promises";
+import { copyFile, link, open, rename, unlink } from "node:fs/promises";
 import { join, extname } from "node:path";
 import { FILE_MAX_BYTES } from "../shared/upload-limits.ts";
 import { DATA_DIR } from "./config.ts";
@@ -110,6 +113,67 @@ export function extensionForMime(mime: string | undefined): string | null {
 
 export function ensureAttachmentsDir(): void {
   mkdirSync(ATTACHMENTS_DIR, { recursive: true, mode: 0o700 });
+}
+
+/** Android's app storage refuses link(2) with EACCES, so the partial cannot become the final name that way. */
+function hardLinksRefused(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "EACCES" || code === "EPERM" || code === "ENOSYS" || code === "EOPNOTSUPP" || code === "EXDEV";
+}
+
+/** The async twin of publishPartial, for the streamed writers: false when the final name was taken. */
+async function publishPartialAsync(partialPath: string, path: string, bytes: number): Promise<boolean> {
+  try {
+    await link(partialPath, path);
+    addCommittedBytes(bytes);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+    if (!hardLinksRefused(error)) throw error;
+  }
+  if (existsSync(path)) return false;
+  const staged = `${path}.${randomUUID()}.publishing`;
+  try {
+    await copyFile(partialPath, staged);
+    if (existsSync(path)) return false;
+    await rename(staged, path);
+  } finally {
+    await unlink(staged).catch(() => undefined);
+  }
+  addCommittedBytes(bytes);
+  return true;
+}
+
+/** Moves the partial onto its final name, and says false when that name was already taken.
+ *
+ *  A hard link publishes the bytes with an atomic no-overwrite step on every ordinary file system.
+ *  Android's own storage denies it, so there the file is copied to a temporary name and renamed into
+ *  place, keeping "never overwrite an existing upload" intact. */
+function publishPartial(partialPath: string, path: string, bytes: number): boolean {
+  try {
+    linkSync(partialPath, path);
+    addCommittedBytes(bytes);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "EEXIST") return false;
+    if (!hardLinksRefused(error)) throw error;
+  }
+  if (existsSync(path)) return false;
+  const staged = `${path}.${randomUUID()}.publishing`;
+  try {
+    copyFileSync(partialPath, staged);
+    if (existsSync(path)) {
+      try { unlinkSync(staged); } catch { /* reported below */ }
+      return false;
+    }
+    renameSync(staged, path);
+  } catch (error) {
+    try { unlinkSync(staged); } catch { /* nothing to clean */ }
+    throw error;
+  }
+  addCommittedBytes(bytes);
+  return true;
 }
 
 export function validateAttachmentUploadId(value: string | undefined): string | undefined {
@@ -432,18 +496,14 @@ export async function saveFile(
       if (bytes === 0) throw statusError(400, "empty file");
       await file.close();
       closed = true;
-      try {
-        const accountingVersion = attachmentAccountingVersion;
-        await link(partialPath, path);
-        addCommittedBytes(bytes, accountingVersion);
-        await unlink(partialPath);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const accountingVersion = attachmentAccountingVersion;
+      if (!await publishPartialAsync(partialPath, path, bytes)) {
         if (statSync(path).size !== bytes || await digestFile(path) !== await digestFile(partialPath)) {
           throw statusError(409, "uploadId was already used for different file bytes");
         }
-        await unlink(partialPath);
       }
+      addCommittedBytes(bytes, accountingVersion);
+      await unlink(partialPath);
       return { path, name, mime: normalized, bytes };
     } catch (error) {
       if (file && !closed) await file.close().catch(() => undefined);
@@ -484,11 +544,7 @@ export async function saveNamedAttachment(name: string, chunks: AsyncIterable<Ui
     await file.close();
     file = undefined;
     const accountingVersion = attachmentAccountingVersion;
-    try { await link(partialPath, path); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") return { stored: false };
-      throw error;
-    }
+    if (!await publishPartialAsync(partialPath, path, bytes)) return { stored: false };
     addCommittedBytes(bytes, accountingVersion);
     return { stored: true };
   } finally {
@@ -529,11 +585,7 @@ export function saveImage(bytes: Buffer, mime: string, requestedUploadId?: strin
   let partialCleanupFailed = false;
   try {
     writeFileSync(partialPath, bytes, { mode: 0o600, flag: "wx" });
-    try {
-      linkSync(partialPath, path);
-      addCommittedBytes(bytes.byteLength);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    if (!publishPartial(partialPath, path, bytes.byteLength)) {
       const saved = readFileSync(path);
       if (!saved.equals(bytes)) {
         throw statusError(409, "uploadId was already used for different image bytes");

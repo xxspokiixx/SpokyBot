@@ -13,9 +13,10 @@ import { CHROME_EYES, CHROME_GRADIENT, MAUS_COLORS, type MausColor, type MausMot
 import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
 import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, mascotFaceInk, type BotAvatarCrop, type MascotFaceColor } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, botMascotBody } from "../../shared/mascot-bodies";
-import { isHalloweenBody, type BotBodyId } from "../../shared/bot-body";
+import { isHalloweenBody, isPokemonBody, type BotBodyId } from "../../shared/bot-body";
 import { useHalloweenDressed, wornBody } from "@/lib/halloween-dress";
 import { CarvedAvatar } from "./CarvedAvatar";
+import { PokemonAvatar } from "./PokemonAvatar";
 import { steelBodyImage } from "@/lib/steel-body";
 
 export const EYE_SCALE = 1.12;
@@ -103,6 +104,24 @@ function MausAvatarComponent(props: MausAvatarProps, ref: React.Ref<MausAvatarHa
   if (isHalloweenBody(bodyId)) {
     return (
       <CarvedAvatar
+        ref={ref}
+        body={bodyId}
+        color={color}
+        faceColor={props.faceColor}
+        size={size}
+        state={state}
+        motion={motion}
+        motionKey={motionKey}
+        gaze={gaze}
+        trackPointer={trackPointer}
+        animated={animated}
+        label={label}
+      />
+    );
+  }
+    if (isPokemonBody(bodyId)) {
+    return (
+      <PokemonAvatar
         ref={ref}
         body={bodyId}
         color={color}

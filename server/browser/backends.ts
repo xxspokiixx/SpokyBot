@@ -6,6 +6,7 @@ import type { Identity } from "./cdp/identity.ts";
 import { webSocketTransport } from "./cdp/transport.ts";
 import { fitPage, pageLimit, type BrowserMode, type HostKind, type ScreenSpec } from "./chrome/flags.ts";
 import { launchChrome, type ChromeProcess, type LaunchOptions } from "./chrome/launch.ts";
+import { needsNoSandbox } from "./chrome/identity.ts";
 import { clearSingleton, staleSingletonLock, type ProcessRegistry } from "./chrome/processes.ts";
 import { languageList } from "./chrome/wrapper.ts";
 import { downgradeRefusal, ensureProfile, forgetOpenTabs, markCleanExit, profileDir, profileHash, recordOpenedBy, versionOf, workspaceId } from "./chrome/profile.ts";
@@ -127,7 +128,9 @@ export class LocalBackend implements Backend {
       screen,
       locale,
       egressPort,
-      sandbox: options.sandbox ?? true,
+      // Chrome's own sandbox needs user namespaces, which the phone's proot does not have: started
+      // with one there, it exits before the DevTools handshake and every browser request fails.
+      sandbox: options.sandbox ?? !needsNoSandbox(),
       startUrl: request.fresh || created ? "about:blank" : null,
       viewport,
       timezone: options.timezone?.() ?? null,

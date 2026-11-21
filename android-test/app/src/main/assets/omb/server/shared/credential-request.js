@@ -88,6 +88,12 @@ export const CREDENTIAL_TARGETS = {
         placeholder: "gsk_…",
         helpUrl: "https://console.groq.com/keys",
     },
+    nvidiaApiKey: {
+        label: "NVIDIA API key",
+        description: "Runs NVIDIA NIM models with your own key.",
+        placeholder: "nvapi-…",
+        helpUrl: "https://build.nvidia.com/settings/api-keys",
+    },
     greenferenceApiKey: {
         label: "Greenference API key",
         description: "Runs Greenference models with your own key.",
@@ -109,7 +115,7 @@ export const CREDENTIAL_TARGETS = {
 };
 /** AI provider keys: the server's config only, like Settings → Keys, and refused where Admin manages the models. */
 export const PROVIDER_CREDENTIAL_TARGETS = [
-    "openaiApiKey", "anthropicApiKey", "openrouterApiKey", "mistralApiKey", "cerebrasApiKey", "groqApiKey", "greenferenceApiKey", "metaApiKey", "deepseekApiKey",
+    "openaiApiKey", "anthropicApiKey", "openrouterApiKey", "mistralApiKey", "cerebrasApiKey", "groqApiKey", "nvidiaApiKey", "greenferenceApiKey", "metaApiKey", "deepseekApiKey",
 ];
 /** A secret SpokyBot does not keep itself: the bot names it, and gets a one-use reference or a private file. */
 export const CUSTOM_SECRET_TARGET = "customSecret";
@@ -165,6 +171,8 @@ export function credentialConfigPatch(id, value) {
             return { cerebras: { key: value } };
         case "groqApiKey":
             return { groq: { key: value } };
+        case "nvidiaApiKey":
+            return { nvidia: { key: value } };
         case "greenferenceApiKey":
             return { greenference: { key: value } };
         case "metaApiKey":
@@ -203,6 +211,8 @@ export function credentialIsConfigured(config, id) {
             return Boolean(config.cerebras?.key);
         case "groqApiKey":
             return Boolean(config.groq?.key);
+        case "nvidiaApiKey":
+            return Boolean(config.nvidia?.key);
         case "greenferenceApiKey":
             return Boolean(config.greenference?.key);
         case "metaApiKey":

@@ -12,6 +12,14 @@
 
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
+    <!-- Package visibility (Android 11+): without these, the speech recognizer cannot be discovered
+         or bound, and dictation fails with no error the person could act on. -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+
     <application
         android:enableOnBackInvokedCallback="false"
         android:label="@string/app_label"

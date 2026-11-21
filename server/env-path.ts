@@ -3,7 +3,8 @@
 import { execFile } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, delimiter, dirname, extname, join } from "node:path";
+import { basename, delimiter, dirname, extname, isAbsolute, join, sep } from "node:path";
+import { androidGuest, guestCommandFor, needsGuestLoader } from "./android-guest.ts";
 
 function nvmBinDirs(): string[] {
   try {
@@ -391,16 +392,43 @@ function resolveWord(cli: string, args: string[], env?: NodeJS.ProcessEnv): Reso
   return viaNode ? { command: viaNode.command, args: [...viaNode.args, ...args] } : { command: file, args };
 }
 
+/** A downloaded engine lives under the phone's data dir. Android cannot exec a glibc engine it finds there;
+ *  the guest can. The app's own node is a bionic Android binary (`libnodeexec.so`), which runs outside the
+ *  guest and cannot run inside it: wrapping it made the local computer's MCP answer ENOENT and every turn
+ *  with "this computer" died with "initial connection or tool synchronization failed". */
+function wrapDataDirEngine(resolved: ResolvedSpawn, env?: NodeJS.ProcessEnv): ResolvedSpawn {
+  const guest = androidGuest(env);
+  const root = guest?.dataDir;
+  if (!root || !isAbsolute(resolved.command) || !existsSync(resolved.command)) return resolved;
+  const prefix = root.endsWith(sep) ? root : root + sep;
+  if (!resolved.command.startsWith(prefix)) return resolved;
+  // The app's own runtime is Android-native whatever folder it sits in.
+  if (basename(resolved.command) === APP_NODE) return resolved;
+  const wrapped = guestCommandFor(guest, resolved.command, resolved.args, env);
+  return { command: wrapped.command, args: wrapped.args };
+}
+
+/** The app's own Node runtime, which Android runs natively and the guest cannot. */
+const APP_NODE = "libnodeexec.so";
+
 export function resolveCliSpawn(cli: string, args: string[], env?: NodeJS.ProcessEnv): ResolvedSpawn {
+  // An engine staged on the phone is a glibc build Android cannot exec, so it runs inside the
+  // guest the same way every other guest command does. The app's own Node is the exception: it is an
+  // Android binary, runs natively, and cannot run inside the guest at all.
+  const guest = androidGuest(env);
+  if (guest && basename(cli) !== APP_NODE && needsGuestLoader(cli, env) && !cli.includes(" ")) {
+    const wrapped = guestCommandFor(guest, cli, args, env);
+    return wrapDataDirEngine({ command: wrapped.command, args: wrapped.args }, env);
+  }
   // An existing file wins over the tokenizer: candidate paths with spaces arrive unquoted.
   const trimmed = cli.trim();
-  if (trimmed.includes(" ") && existsSync(trimmed)) return resolveWord(trimmed, args, env);
+  if (trimmed.includes(" ") && existsSync(trimmed)) return wrapDataDirEngine(resolveWord(trimmed, args, env), env);
   // One tokenizer pass; the head is never re-split, and fixed args go first so a wrapper's subcommand leads.
   const split = splitCliString(cli);
   if (split.length > 1 || split[0] !== trimmed) {
     const [head, ...fixed] = split;
     if (!head) return { command: cli, args };
-    return resolveWord(head, [...fixed, ...args], env);
+    return wrapDataDirEngine(resolveWord(head, [...fixed, ...args], env), env);
   }
-  return resolveWord(cli, args, env);
+  return wrapDataDirEngine(resolveWord(cli, args, env), env);
 }

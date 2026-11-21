@@ -5,7 +5,10 @@ import { describe, expect, it } from "vitest";
 import { CarvedAvatar, REST_POSE, carvedFills, carvedGeometry } from "./CarvedAvatar";
 import { MausAvatar } from "./Avatar";
 import { HALLOWEEN_BODIES, HALLOWEEN_BODY_IDS } from "../../shared/halloween-bodies";
+import { POKEMON_BODY_IDS } from "../../shared/pokemon-bodies";
 import { MAUS_COLORS } from "@/lib/mascot";
+
+const POKEMON_COLORS = { charmander: "#f0883e" } as const;
 
 const render = (body: (typeof HALLOWEEN_BODY_IDS)[number], color: "orange" | "purple" = "orange") =>
   renderToStaticMarkup(createElement(CarvedAvatar, { body, color, animated: false, label: body }));
@@ -54,5 +57,30 @@ describe("CarvedAvatar", () => {
     const rest = carvedGeometry(body, REST_POSE);
     expect(left.eyes[0].x).toBeLessThan(rest.eyes[0].x);
     expect(left.body).toContain("rotate(9)");
+  });
+});
+
+describe("a Pokémon body", () => {
+  it("draws its own parts and the same carved face", () => {
+    const markup = renderToStaticMarkup(createElement(MausAvatar, { color: "orange", bodyId: "pikachu", animated: false }));
+    expect(markup).toContain('data-carved-body="pikachu"');
+    // Its two ears, body and two cheek marks, plus the clip path and the smile the face adds.
+    expect(markup.match(/<path /g)?.length).toBe(7);
+    expect(markup.match(/<rect /g)?.length).toBe(2);
+    expect(markup).not.toContain("linearGradient");
+  });
+
+  it("keeps the species colour rather than the bot's", () => {
+    const markup = renderToStaticMarkup(createElement(MausAvatar, { color: "teal", bodyId: "charmander", animated: false }));
+    expect(markup).toContain(POKEMON_COLORS.charmander);
+    expect(markup).not.toContain(MAUS_COLORS.teal);
+  });
+
+  it("draws every one of the 151 without throwing", () => {
+    for (const id of POKEMON_BODY_IDS) {
+      const markup = renderToStaticMarkup(createElement(MausAvatar, { color: "green", bodyId: id, animated: false }));
+      expect(markup, id).toContain(`data-carved-body="${id}"`);
+      expect(markup.match(/<rect /g)?.length, id).toBe(2);
+    }
   });
 });

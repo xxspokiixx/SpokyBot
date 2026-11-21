@@ -10,6 +10,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { createHash } from "node:crypto";
 
 import { PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
+import { guestWorkspacePath, hostWorkspacePath } from "../../android-guest.ts";
 import { openStartupModelCatalog, readStartupModelCache, unconfirmedModelCatalog, writeStartupModelCache } from "../../startup-model-catalog.ts";
 import { decodeInjectId } from "../local-inject.ts";
 import { DeviceAuthController, type DeviceSignIn } from "../device-auth.ts";
@@ -662,8 +663,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           if (typeof requestPath !== "string" || !isAbsolute(requestPath)) {
             throw new Error("ACP file paths must be absolute.");
           }
+          // The engine names files the way its own guest sees them.
+          const requestHost = hostWorkspacePath(requestPath, env);
           const workspace = await realpath(cwd).catch(() => resolve(cwd));
-          const requested = resolve(requestPath);
+          const requested = resolve(requestHost);
           const lexical = relative(resolve(cwd), requested);
           if (lexical === ".." || lexical.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(lexical)) {
             throw new Error("ACP file path is outside the session workspace.");
@@ -1037,6 +1040,11 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const turnId = retryOf ?? newId();
         const cwd = turn.cwd ?? turnConfig.workspace ?? homedir();
         const env = childEnv(turnConfig);
+        // The engine runs inside the phone's guest, which sees its own mounts rather than these
+        // host paths: a turn given the host folder works nowhere and fails before its first model
+        // call. Everything the engine is told about the folder — the session and the permissions
+        // written into its environment — names it the way that guest does.
+        const engineCwd = guestWorkspacePath(cwd, env);
         if (
           support.requireAuthenticationBeforeSpawn
           && !skipSubscriptionAuthForLocalInject(turn.model)
@@ -1055,7 +1063,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const mcpServers = acpMcpServers(turn, { http: support.ownMcpOverHttp === true, engine: support.driverKind,
           toolBudget: mcpToolBudget(learnedToolCountLimit(toolLimitKey), support.engineTools ?? 32) });
         support.applyTurnEnv?.(env, {
-          model: resolvedModel, requestedModel: turn.model, fullAuto: turnConfig.fullAuto === true, botId: turn.botId, cwd, toolScope: turn.toolScope,
+          model: resolvedModel, requestedModel: turn.model, fullAuto: turnConfig.fullAuto === true, botId: turn.botId, cwd: engineCwd, toolScope: turn.toolScope,
           threadId, mcpServers,
         });
         let cliTurn =
@@ -1276,13 +1284,13 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 break;
               }
               const selectionParams = narrowsNativeTools(turn.toolScope)
-                ? support.toolScopeSessionParams!(turn, init, mcpServers.length > 0, { config: turnConfig, env, cwd }) : {};
+                ? support.toolScopeSessionParams!(turn, init, mcpServers.length > 0, { config: turnConfig, env, cwd: engineCwd }) : {};
               let loaded = false;
               if (cursor) {
                 try {
                   await request(
                     support.resumeMethod === "resume" ? "session/resume" : "session/load",
-                    { sessionId: cursor, cwd, mcpServers, ...selectionParams },
+                    { sessionId: cursor, cwd: engineCwd, mcpServers, ...selectionParams },
                     LOAD_SESSION_TIMEOUT,
                     (result) => {
                       if (result) {
@@ -1325,7 +1333,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 promptTurn = { ...turn, text: recovery.text };
                 rebuiltFromReplay = recovery.replayed;
               }
-              await request("session/new", { cwd, mcpServers, ...selectionParams }, NEW_SESSION_TIMEOUT, (result) => {
+              await request("session/new", { cwd: engineCwd, mcpServers, ...selectionParams }, NEW_SESSION_TIMEOUT, (result) => {
                 session.sessionId = typeof result?.sessionId === "string" ? result.sessionId : null;
                 session.sessionKey = sessionKey;
                 receiveModelVariants(result, true);
@@ -1627,9 +1635,12 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           throw new Error(support.loginNote);
         }
         const cwd = mkdtempSync(join(await support.oneShotFolder?.() ?? tmpdir(), "omb-acp-memory-"));
+        // The engine is a guest process on the phone and cannot see this host folder: tell it the
+        // path it can actually open, or every memory call fails before its first model request.
+        const engineCwd = guestWorkspacePath(cwd, env);
         try {
-          const turn = { threadId: `memory-text-${newId()}`, text: prompt, approvalMode: "ask", cwd } as SendTurnInput;
-          support.applyTurnEnv?.(env, { fullAuto: false, cwd, threadId: turn.threadId, mcpServers: [] });
+          const turn = { threadId: `memory-text-${newId()}`, text: prompt, approvalMode: "ask", cwd: engineCwd } as SendTurnInput;
+          support.applyTurnEnv?.(env, { fullAuto: false, cwd: engineCwd, threadId: turn.threadId, mcpServers: [] });
           const launch = support.resolveCommand ? await support.resolveCommand(env, turnConfig, instanceId) : { command: turnConfig.cli };
           const spawnEnv = launch.env ?? env;
           return await runAcpOneShot({

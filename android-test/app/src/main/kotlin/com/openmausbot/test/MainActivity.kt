@@ -3,9 +3,15 @@ package com.openmausbot.test
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import java.io.File
 import android.util.Log
 import android.view.ViewGroup
@@ -110,13 +116,27 @@ class MainActivity : Activity() {
         startForegroundService(service)
     }
 
-    private fun render(status: NodeState.Status) = when (status.phase) {
-        NodeState.Phase.Ready -> if (status.paired) attachWebView() else showBoot(describe(status), status.logTail)
-        NodeState.Phase.Failed,
-        NodeState.Phase.BundleMissing,
-        NodeState.Phase.RuntimeMissing,
-        -> showBoot(describe(status), status.logTail, failure = true)
-        else -> showBoot(describe(status), status.logTail)
+    private var sawPaired = false
+
+    private fun render(status: NodeState.Status) {
+        if (status.phase == NodeState.Phase.Ready) {
+            // Attach before pairing, not after: CookieManager drops cookies set while no WebView exists
+            // yet, so a session minted during boot was never kept. The page may open on the pairing
+            // screen; once the session is stored, it is reloaded in place.
+            attachWebView()
+            if (status.paired && !sawPaired && webView != null) {
+                sawPaired = true
+                webView?.reload()
+            }
+            return
+        }
+        when (status.phase) {
+            NodeState.Phase.Failed,
+            NodeState.Phase.BundleMissing,
+            NodeState.Phase.RuntimeMissing,
+            -> showBoot(describe(status), status.logTail, failure = true)
+            else -> showBoot(describe(status), status.logTail)
+        }
     }
 
     private fun describe(status: NodeState.Status): String {
@@ -192,6 +212,18 @@ class MainActivity : Activity() {
                 @android.webkit.JavascriptInterface
                 fun capabilitiesJson(): String = CAPABILITIES_JSON
 
+                /** Native dictation: Android's recognizer speaks the same protocol the desktop's helper does. */
+                @android.webkit.JavascriptInterface
+                fun speechStart(): Boolean {
+                    runOnUiThread { startSpeech() }
+                    return true
+                }
+
+                @android.webkit.JavascriptInterface
+                fun speechStop() {
+                    runOnUiThread { stopSpeech() }
+                }
+
                 @android.webkit.JavascriptInterface
                 fun buildVersion(): String = runCatching {
                     File(filesDir, "omb-installed/VERSION").readText().trim()
@@ -253,6 +285,18 @@ class MainActivity : Activity() {
                 pendingDeepLink?.let { link ->
                     pendingDeepLink = null
                     dispatchDeepLink(link)
+                }
+                // The bundle is served to a page with no session too, so the page itself cannot tell
+                // it was never paired. Asking from here is what recovers a reinstall, which clears the
+                // WebView's cookies while the data folder keeps the server's sessions registry.
+                view.evaluateJavascript(
+                    "fetch('/api/auth/session',{credentials:'include'}).then(r=>r.ok?'ok':('no-'+r.status)).catch(()=>'no-net')",
+                ) { result ->
+                    // "ok" means this WebView holds a session; anything else means it needs one, and
+                    // the server's own pages cannot tell. Asking from here recovers a reinstall,
+                    // which clears the WebView's cookies while the data folder keeps the registry.
+                    val fine = result?.contains("\"ok\"") == true
+                    if (!fine && NodeState.status.value.phase == NodeState.Phase.Ready) NodeHostService.requestPairing()
                 }
                 view.evaluateJavascript(
                     "(window.ombAndroidCaps ? 'bridge:' + ombAndroidCaps.capabilitiesJson().slice(0, 60) + ' notify:' + typeof ombAndroidCaps.notify : 'bridge:MISSING')",
@@ -354,6 +398,130 @@ class MainActivity : Activity() {
 
     private var pendingMicRequest: Pair<PermissionRequest, Array<String>>? = null
 
+    /**
+     * Android's own speech recognizer, standing in for the desktop app's dictation helper. The web
+     * layer speaks one small protocol to either: start, stop, and two events carrying partial and
+     * final text. Recognition is streamed, so a long sentence arrives as it is spoken rather than
+     * after silence.
+     */
+    private var recognizer: SpeechRecognizer? = null
+    private val recognizerThread = Handler(Looper.getMainLooper())
+    private var speechWanted = false
+
+    private fun startSpeech() {
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            // Ask and wait: the answer arrives in onRequestPermissionsResult, which starts the
+            // recognizer. Reporting a failure here would show an error over the system dialog the
+            // person is about to accept.
+            requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), REQUEST_SPEECH_MIC)
+            return
+        }
+        beginRecognition()
+    }
+
+    private fun beginRecognition() {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            emitSpeechEnd(2, "no-recognizer")
+            return
+        }
+        recognizerThread.post {
+            stopSpeechRecognizer()
+            speechWanted = true
+            val engine = SpeechRecognizer.createSpeechRecognizer(this)
+            recognizer = engine
+            engine.setRecognitionListener(object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) {}
+                override fun onBeginningOfSpeech() {}
+                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onEndOfSpeech() {}
+                override fun onEvent(eventType: Int, params: Bundle?) {}
+
+                override fun onPartialResults(partialResults: Bundle?) {
+                    val text = bestText(partialResults, SpeechRecognizer.RESULTS_RECOGNITION)
+                    if (text.isNotEmpty()) emitSpeechTranscript(text, partial = true)
+                }
+
+                override fun onResults(results: Bundle?) {
+                    val text = bestText(results, SpeechRecognizer.RESULTS_RECOGNITION)
+                    if (text.isNotEmpty()) emitSpeechTranscript(text, partial = false)
+                    // The engine stops itself after one utterance; the person may still be talking.
+                    if (speechWanted) restartAfterPause()
+                }
+
+                override fun onError(error: Int) {
+                    when (error) {
+                        SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
+                            // Said nothing yet: silence is not a failure while the microphone is on.
+                            if (speechWanted) restartAfterPause() else emitSpeechEnd(0, null)
+                        }
+                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> emitSpeechEnd(1, "speech-not-authorized")
+                        SpeechRecognizer.ERROR_CLIENT -> Unit
+                        else -> emitSpeechEnd(1, "recognizer-$error")
+                    }
+                }
+            })
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                // The person's own language, so a Spanish sentence is not heard as English.
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault().toLanguageTag())
+                putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
+            }
+            runCatching { engine.startListening(intent) }
+                .onFailure { emitSpeechEnd(1, "recognizer-start") }
+        }
+    }
+
+    /** One utterance ends by itself; a short pause keeps the microphone in the same session. */
+    private fun restartAfterPause() {
+        recognizerThread.postDelayed({
+            if (!speechWanted) return@postDelayed
+            val engine = recognizer ?: return@postDelayed
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault().toLanguageTag())
+            }
+            runCatching { engine.startListening(intent) }.onFailure { emitSpeechEnd(1, "recognizer-start") }
+        }, 120)
+    }
+
+    private fun stopSpeech() {
+        speechWanted = false
+        recognizerThread.post { stopSpeechRecognizer() }
+        emitSpeechEnd(0, null)
+    }
+
+    private fun stopSpeechRecognizer() {
+        recognizer?.let { engine ->
+            runCatching { engine.stopListening() }
+            runCatching { engine.cancel() }
+            runCatching { engine.destroy() }
+        }
+        recognizer = null
+    }
+
+    private fun bestText(bundle: Bundle?, key: String): String =
+        bundle?.getStringArrayList(key)?.firstOrNull()?.trim().orEmpty()
+
+    private fun emitSpeechTranscript(text: String, partial: Boolean) {
+        val escaped = text.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
+        runOnUiThread {
+            webView?.evaluateJavascript(
+                "window.ombSpeech&&window.ombSpeech(${if (partial) "true" else "false"},'$escaped')", null,
+            )
+        }
+    }
+
+    private fun emitSpeechEnd(code: Int, reason: String?) {
+        runOnUiThread {
+            val quoted = reason?.let { "'${it.replace("'", "")}'" } ?: "null"
+            webView?.evaluateJavascript("window.ombSpeechEnd&&window.ombSpeechEnd($code,$quoted)", null)
+        }
+    }
+
     private var pendingCaptureUri: Uri? = null
 
     /** Offers the camera beside the picker, for a file the app serves itself from its cache
@@ -440,10 +608,16 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        val allowed = grantResults.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (requestCode == REQUEST_SPEECH_MIC) {
+            // Answering the dialog is what starts dictation, so a grant resumes the session the
+            // person began instead of making them tap the microphone again.
+            if (allowed) runOnUiThread { beginRecognition() } else emitSpeechEnd(1, "speech-not-authorized")
+            return
+        }
         if (requestCode != REQUEST_MIC) return
         val (request, resources) = pendingMicRequest ?: return
         pendingMicRequest = null
-        val allowed = grantResults.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED
         runOnUiThread { if (allowed) request.grant(resources) else request.deny() }
     }
 
@@ -584,6 +758,9 @@ class MainActivity : Activity() {
         private const val REQUEST_FILE = 7
         private const val REQUEST_SAVE = 8
         private const val REQUEST_MIC = 9
+
+    /** Dictation's own request, kept apart from the WebView's so granting one starts the right thing. */
+    private const val REQUEST_SPEECH_MIC = 11
         internal const val CAPTURE_DIR = "camera-captures"
         private const val MESSAGES_CHANNEL = "omb-messages"
         private const val MESSAGES_SILENT_CHANNEL = "omb-messages-silent"
@@ -598,7 +775,7 @@ class MainActivity : Activity() {
             "{\"host\":{\"platform\":\"android\",\"label\":\"Android\",\"session\":\"headless\",\"packaged\":true}," +
                 "\"windowChrome\":\"native\"," +
                 "\"screenPreview\":{\"available\":false,\"interaction\":\"none\",\"reasonCode\":\"headless-environment\"}," +
-                "\"dictation\":{\"available\":false,\"engine\":\"none\",\"onDevice\":false,\"reasonCode\":\"desktop-app-required\"}," +
+                "\"dictation\":{\"available\":true,\"engine\":\"android-speech\",\"onDevice\":false,\"reasonCode\":null}," +
                 "\"localComputer\":{\"available\":true,\"support\":\"supported\",\"enabled\":true,\"status\":\"ready\"}}"
     }
 }

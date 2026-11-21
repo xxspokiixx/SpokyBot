@@ -11,13 +11,14 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
-  closeSync, createReadStream, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, unlinkSync,
+  chmodSync, closeSync, copyFileSync, createReadStream, existsSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, unlinkSync,
 } from "node:fs";
 import { chmod, copyFile, link, lstat, mkdir, open, readdir, rename, rm, stat, unlink, writeFile, type FileHandle } from "node:fs/promises";
 import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
 import { writeFileAtomic } from "./atomic.ts";
+import { guestInvocation } from "./android-guest.ts";
 import { cliProbeEnvironment } from "./cli-probe.ts";
 import { DATA_DIR, stripControlPlaneEnv } from "./config.ts";
 import { standaloneEnginesRoot } from "./engine-roots.ts";
@@ -40,6 +41,7 @@ const NEW_PREFIX = ".new-";
 const POINTER_TEMP = /^current\.json\..+\.tmp$/u;
 
 const ENGINE_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/u;
+const COMMAND_NAME = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/u;
 // No slash, and it cannot be "." or "..": the first character is a letter or digit.
 const VERSION_NAME = /^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$/u;
 
@@ -110,7 +112,10 @@ export function standalonePlatformKey(
   arch: string = process.arch,
   musl: boolean = linuxWithoutGlibc(),
 ): string {
-  return `${platform}-${arch}${platform === "linux" && musl ? "-musl" : ""}`;
+  // Android is Linux with a glibc interpreter: its engines are the arm64 Linux builds, and the phone
+  // runs them through the guest loader. Without this, every engine looked unpackaged on the phone.
+  const target = platform === "android" ? "linux" : platform;
+  return `${target}-${arch}${target === "linux" && musl ? "-musl" : ""}`;
 }
 
 /** Only the build made for exactly this platform: a glibc build does not start on musl, nor the reverse. */
@@ -149,8 +154,8 @@ function executableIn(versionDir: string, executable: string): string {
   return join(versionDir, ...executable.split("/"));
 }
 
-function programName(executable: string): string {
-  return executable.split("/").at(-1)!;
+function commandName(asset: StandaloneAsset): string {
+  return asset.command ?? asset.executable.split("/").at(-1)!;
 }
 
 function realFile(path: string): boolean {
@@ -270,7 +275,7 @@ function verifiedCurrent(engineDir: string, release: StandaloneRelease): Standal
   const expected = pointer.version === release.version ? asset.executableSha256 : earlier.includes(record.executableSha256) ? record.executableSha256 : null;
   if (!expected || record.executableSha256 !== expected) return null;
   const binDir = join(engineDir, BIN);
-  const name = programName(asset.executable);
+  const name = commandName(asset);
   if (!realDirectory(binDir)) return null;
   // Nothing but the program goes on PATH; a rename Windows could not finish (.old-) is never a command anyone types.
   if (readdirSync(binDir).some((entry) => entry !== name && !entry.startsWith(OLD_PREFIX))) return null;
@@ -284,6 +289,42 @@ function verifiedCurrent(engineDir: string, release: StandaloneRelease): Standal
   return { version: pointer.version, executablePath, binDir };
 }
 
+/** The pinned program is on disk under the archive's own file name. Put it on PATH under `command` and drop the old name. */
+function republishCommand(engineDir: string, release: StandaloneRelease): StandaloneInstalled | null {
+  const asset = standaloneAssetFor(release);
+  if (!asset?.command) return null;
+  const source = executableIn(join(engineDir, release.version), asset.executable);
+  if (!realFile(source)) return null;
+  let hash: string;
+  try {
+    hash = hashFileSync(source);
+  } catch {
+    return null;
+  }
+  if (hash !== asset.executableSha256) return null;
+  const binDir = join(engineDir, BIN);
+  mkdirSync(binDir, { recursive: true, mode: 0o755 });
+  if (!realDirectory(binDir)) return null;
+  const name = commandName(asset);
+  const target = join(binDir, name);
+  if (!realFile(target) || hashFileSync(target) !== hash) {
+    const fresh = join(binDir, `${NEW_PREFIX}${randomUUID()}`);
+    try {
+      linkSync(source, fresh);
+    } catch {
+      copyFileSync(source, fresh);
+      if (process.platform !== "win32") chmodSync(fresh, 0o755);
+    }
+    renameSync(fresh, target);
+  }
+  for (const entry of readdirSync(binDir)) {
+    if (entry !== name && !entry.startsWith(OLD_PREFIX) && !entry.startsWith(NEW_PREFIX)) {
+      try { unlinkSync(join(binDir, entry)); } catch { /* a file still open stays until the next boot */ }
+    }
+  }
+  return realFile(target) ? { version: release.version, executablePath: target, binDir } : null;
+}
+
 /** At boot: the bin/ folder of each engine this app pins, once its program is checked, goes on PATH after everything else. */
 export function registerStandaloneBinDirs(baseDir = DATA_DIR, releases: readonly StandaloneRelease[] = []): void {
   // Never through a link: a linked folder could lead to the person's own files.
@@ -295,7 +336,7 @@ export function registerStandaloneBinDirs(baseDir = DATA_DIR, releases: readonly
     // At boot: a folder that can't be read leaves this copy off PATH, never stops the server.
     try {
       sweepLeftovers(engineDir);
-      const current = verifiedCurrent(engineDir, release);
+      const current = verifiedCurrent(engineDir, release) ?? republishCommand(engineDir, release);
       if (!current) continue;
       activeVersions.add(join(engineDir, current.version));
       registerFallbackPathDir(current.binDir);
@@ -325,7 +366,8 @@ function checkRelease(release: StandaloneRelease, asset: StandaloneAsset): void 
   if (
     !ENGINE_NAME.test(release.engine) || !usableVersionName(release.version) || !SHA256.test(asset.sha256)
     || typeof asset.executableSha256 !== "string" || !SHA256.test(asset.executableSha256)
-    || !safeArchivePath(asset.executable) || !Number.isSafeInteger(asset.approxBytes) || asset.approxBytes <= 0
+    || !safeArchivePath(asset.executable) || (asset.command !== undefined && !COMMAND_NAME.test(asset.command))
+    || !Number.isSafeInteger(asset.approxBytes) || asset.approxBytes <= 0
     || (release.macTeamId !== undefined && !TEAM_ID.test(release.macTeamId))
   ) throw new StandaloneInstallError(`${release.name}'s install details are invalid. Nothing was downloaded.`);
 }
@@ -516,8 +558,11 @@ const signedHere = (key: string, release: StandaloneRelease) => key.startsWith("
 function probeVersion(executable: string, release: StandaloneRelease): Promise<string | null> {
   const env: NodeJS.ProcessEnv = { ...cliProbeEnvironment(), ...release.runEnv };
   stripControlPlaneEnv(env as Record<string, string | undefined>);
+  // On the phone the installed engine is a glibc build Android cannot exec directly, so the probe
+  // goes through the guest, exactly as the engine itself does when a bot runs it.
+  const invocation = guestInvocation(executable, ["--version"], env);
   return new Promise((resolveProbe) => {
-    execFile(executable, ["--version"], { env, timeout: PROBE_TIMEOUT_MS, killSignal: "SIGKILL", maxBuffer: 64 * 1024, windowsHide: true, encoding: "utf8" }, (error, stdout, stderr) => {
+    execFile(invocation.command, invocation.args, { env: invocation.env, timeout: PROBE_TIMEOUT_MS, killSignal: "SIGKILL", maxBuffer: 64 * 1024, windowsHide: true, encoding: "utf8" }, (error, stdout, stderr) => {
       const lines = (text: string) => stripVTControlCharacters(text).split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
       if (error) {
         const { code, killed } = error as { code?: unknown; killed?: boolean };
@@ -607,7 +652,7 @@ async function activate(engineDir: string, release: StandaloneRelease, asset: St
   const binDir = join(engineDir, BIN);
   await checkBinFolder(binDir, release);
   await realFolder(binDir, release);
-  const name = programName(asset.executable);
+  const name = commandName(asset);
   const source = executableIn(versionDir, asset.executable);
   const target = join(binDir, name);
   const fresh = join(binDir, `${NEW_PREFIX}${randomUUID()}${extname(name)}`);

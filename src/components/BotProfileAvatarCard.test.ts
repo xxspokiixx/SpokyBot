@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { StoreProvider, type Bot } from "@/state/store";
 import { MASCOT_BODY_IDS, MASCOT_BODIES } from "../../shared/mascot-bodies";
 import { HALLOWEEN_BODIES, HALLOWEEN_BODY_IDS } from "../../shared/halloween-bodies";
+import { POKEMON_BODIES, POKEMON_BODY_IDS } from "../../shared/pokemon-bodies";
 import { BotProfileAvatarCard } from "./BotProfileAvatarCard";
 
 function makeBot(overrides: Partial<Bot> = {}): Bot {
@@ -56,6 +57,20 @@ describe("BotProfileAvatarCard body picker", () => {
       expect(markup).toContain(`aria-label="Use the ${HALLOWEEN_BODIES[id].name} body"`);
     }
     expect(markup).toContain(`aria-pressed="true" aria-label="Use the ${HALLOWEEN_BODIES.witch.name} body"`);
+  });
+
+  it("keeps the 151 Pokémon behind a collapsed section, and opens it for a bot wearing one", () => {
+    // Identity is where a person looks for a bot's icon; the section has to be reachable from here.
+    const closed = renderCard(makeBot());
+    expect(closed).toContain(">Pokémon<");
+    expect(closed).toContain('aria-expanded="false"');
+    expect(closed).not.toContain("data-avatar-pokemon-bodies");
+
+    const open = renderCard(makeBot({ mascotBody: "pikachu" }));
+    expect(open).toContain('data-avatar-pokemon-bodies');
+    expect(open).toContain(`aria-pressed="true" aria-label="Use the ${POKEMON_BODIES.pikachu.name} body"`);
+    // Every one is offered; the count is what proves the whole generation is there.
+    expect(open.match(/aria-label="Use the [^"]+ body"/g)?.length).toBe(MASCOT_BODY_IDS.length + HALLOWEEN_BODY_IDS.length + POKEMON_BODY_IDS.length);
   });
 
   it("marks the current body pressed and the rest unpressed, defaulting to cursor", () => {

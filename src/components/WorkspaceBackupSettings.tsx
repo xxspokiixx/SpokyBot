@@ -10,7 +10,8 @@ import { Card } from "./SettingsPrimitives";
 type BackupStatus = { busy: boolean; pendingRestore?: boolean; lastRestoreId?: string };
 const inputClass = "w-full rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[14px] text-ink disabled:opacity-50";
 const buttonClass = "cursor-pointer inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-accent-ink disabled:opacity-40";
-const validPassword = (value: string) => value.length >= 1 && value.length <= 1024;
+// Any password with at least one character: only emptiness is refused.
+const validPassword = (value: string) => value.length >= 1;
 
 const RESTORE_CATEGORIES = [
   { id: "bots", labelKey: "backup.restore.bots", summaryKey: "bots" },
@@ -107,7 +108,14 @@ export function WorkspaceBackupSettings() {
     setBusy(operation);
     setError(null);
     try { await work(); }
-    catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : String(cause)); }
+    catch (cause) {
+      if (!alive.current) return;
+      // A dropped connection says only "Failed to fetch", which tells the person nothing they can act on.
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setError(/^failed to fetch$/i.test(message)
+        ? t("backup.connectionLost")
+        : message);
+    }
     finally { lock.current = false; if (alive.current) setBusy(null); }
   };
 
@@ -144,13 +152,19 @@ export function WorkspaceBackupSettings() {
       id = result.id;
       if (alive.current) setUploadedId(id);
     }
-    const result: { id: string; summary: WorkspaceBackupSummary } = await api("/api/workspace-backup/preview", {
-      method: "POST", body: JSON.stringify({ id, password: importPassword }),
-    }).catch((cause: unknown) => {
-      if (cause instanceof Error && "status" in cause && cause.status === 404 && alive.current) setUploadedId(null);
+    try {
+      const result: { id: string; summary: WorkspaceBackupSummary } = await api("/api/workspace-backup/preview", {
+        method: "POST", body: JSON.stringify({ id, password: importPassword }),
+      }).catch((cause: unknown) => {
+        // The server forgets an upload whose preview it completed, so a retry needs a fresh one.
+        if (cause instanceof Error && "status" in cause && cause.status === 404 && alive.current) setUploadedId(null);
+        throw cause;
+      });
+      if (alive.current) { setPreview({ id: result.id, summary: result.summary }); setUploadedId(null); setImportPassword(""); }
+    } catch (cause) {
+      if (alive.current) setUploadedId(null);
       throw cause;
-    });
-    if (alive.current) { setPreview({ id: result.id, summary: result.summary }); setUploadedId(null); setImportPassword(""); }
+    }
   });
 
   const restoreBackup = () => perform("restore", async () => {
@@ -184,8 +198,8 @@ export function WorkspaceBackupSettings() {
             {(!status || status.busy) && <div role="status" className="flex items-center gap-3 px-4 text-[13px] text-ink-secondary"><span>{status?.busy ? t("backup.serverBusy") : t("backup.checkStatus")}</span><button type="button" onClick={() => void refresh()} className="cursor-pointer underline">{t("connectors.action.retry")}</button></div>}
             <Card title={t("backup.export")} subtitle={t("backup.passwordHint")}>
                 <form className="flex flex-col gap-3" onSubmit={(event) => { event.preventDefault(); void exportBackup(); }}>
-                <label className="text-[13px] text-ink">{t("backup.exportPassword")}<input type="password" autoComplete="new-password" maxLength={1024} required disabled={disabled} value={exportPassword} onChange={(event) => setExportPassword(event.target.value)} className={`${inputClass} mt-1`} /></label>
-                <label className="text-[13px] text-ink">{t("backup.confirmPassword")}<input type="password" autoComplete="new-password" maxLength={1024} required disabled={disabled} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className={`${inputClass} mt-1`} /></label>
+                <label className="text-[13px] text-ink">{t("backup.exportPassword")}<input type="password" autoComplete="new-password" required disabled={disabled} value={exportPassword} onChange={(event) => setExportPassword(event.target.value)} className={`${inputClass} mt-1`} /></label>
+                <label className="text-[13px] text-ink">{t("backup.confirmPassword")}<input type="password" autoComplete="new-password" required disabled={disabled} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className={`${inputClass} mt-1`} /></label>
                 <div className="space-y-2">
                   <p className="text-[13px] font-medium text-ink">{t("backup.selectCategories")}</p>
                   {RESTORE_CATEGORIES.map((cat) => {
@@ -215,7 +229,7 @@ export function WorkspaceBackupSettings() {
             <Card title={t("backup.import")} subtitle={t("backup.importHint")}>
                 <form className="flex flex-col gap-3" onSubmit={(event) => { event.preventDefault(); void previewBackup(); }}>
                 <label className="text-[13px] text-ink">{t("backup.file")}<input type="file" accept=".ombbackup" disabled={disabled} onChange={(event) => { setFile(event.target.files?.[0] ?? null); setUploadedId(null); setPreview(null); setImportPassword(""); setError(null); }} className="mt-1 block w-full min-w-0 rounded-lg border border-hairline/50 bg-inset p-2 text-[13px] text-ink file:mr-3 file:rounded file:border-0 file:bg-control file:px-2 file:py-1 file:text-ink disabled:opacity-50" /></label>
-                {!preview && <><label className="text-[13px] text-ink">{t("backup.importPassword")}<input type="password" autoComplete="off" maxLength={1024} required disabled={disabled || !file} value={importPassword} onChange={(event) => setImportPassword(event.target.value)} className={`${inputClass} mt-1`} /></label><button type="submit" disabled={disabled || !file || !importPassword} className={buttonClass}>{busy === "preview" ? <Loader2 aria-hidden="true" size={15} className="animate-spin" /> : <Upload aria-hidden="true" size={15} />}{busy === "preview" ? t("backup.validating") : t("backup.validate")}</button></>}
+                {!preview && <><label className="text-[13px] text-ink">{t("backup.importPassword")}<input type="password" autoComplete="off" required disabled={disabled || !file} value={importPassword} onChange={(event) => setImportPassword(event.target.value)} className={`${inputClass} mt-1`} /></label><button type="submit" disabled={disabled || !file || !importPassword} className={buttonClass}>{busy === "preview" ? <Loader2 aria-hidden="true" size={15} className="animate-spin" /> : <Upload aria-hidden="true" size={15} />}{busy === "preview" ? t("backup.validating") : t("backup.validate")}</button></>}
                 </form>
                 {preview && <div className="mt-4 flex flex-col gap-3">
                 <WorkspaceBackupSummaryView summary={preview.summary} />

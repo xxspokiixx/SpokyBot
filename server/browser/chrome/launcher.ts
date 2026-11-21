@@ -71,6 +71,8 @@ export interface ChromeLauncherOptions {
 }
 
 export class ChromeLauncher implements BrowserLaunch {
+  /** Executables already reported as impossible, so a start that fails again does not repeat itself. */
+  private static readonly warned = new Set<string>();
   /** The executable agent-browser is given; the same path for every browser this data dir starts. */
   readonly path: string;
   private state: State = { kind: "idle" };
@@ -151,7 +153,11 @@ export class ChromeLauncher implements BrowserLaunch {
     }, (error: unknown) => {
       // A launcher that already works is kept as it is: switching browsers under a running session would lose its pages.
       this.state = previous ? { ...previous, fingerprint: this.fingerprintOr(previous) } : { kind: "failed", reason: message(error) };
-      this.log(`browser: Chrome could not be prepared (${message(error)}); ${previous ? "keeping the browser already set up" : "bots keep the engine's own browser"}`);
+      // Said once per process: the failure is remembered, so repeating it every start only crowds the log.
+      if (!ChromeLauncher.warned.has(this.path)) {
+        ChromeLauncher.warned.add(this.path);
+        this.log(`browser: Chrome could not be prepared (${message(error)}); ${previous ? "keeping the browser already set up" : "bots use their own engine's browser instead"}`);
+      }
     }).finally(() => { this.preparing = null; });
     return this.preparing;
   }

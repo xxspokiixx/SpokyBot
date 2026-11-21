@@ -1,4 +1,4 @@
-export const PROVIDER_KEY_KINDS = ["anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "meta"];
+export const PROVIDER_KEY_KINDS = ["anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "nvidia", "greenference", "meta"];
 const DEFAULT_URLS = {
     anthropic: "https://api.anthropic.com",
     openai: "https://api.openai.com/v1",
@@ -8,6 +8,7 @@ const DEFAULT_URLS = {
     mistral: "https://api.mistral.ai/v1",
     cerebras: "https://api.cerebras.ai/v1",
     groq: "https://api.groq.com/openai/v1",
+    nvidia: "https://integrate.api.nvidia.com/v1",
     greenference: "https://llm.eu.greenference.com/v1",
     meta: "https://api.meta.ai/v1",
 };

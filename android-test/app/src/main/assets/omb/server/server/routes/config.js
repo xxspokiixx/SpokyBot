@@ -25,7 +25,7 @@ export function createConfigRoutes(deps) {
         }
         if ((method === "PUT" || method === "PATCH") && path === "/api/config") {
             const body = await readBody(req);
-            if (hostedModels && ["instances", "anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "meta", "opencodeGo"].some(key => Object.hasOwn(body, key)))
+            if (hostedModels && ["instances", "anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "nvidia", "greenference", "meta", "opencodeGo"].some(key => Object.hasOwn(body, key)))
                 return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
             const patch = parseConfigPatch(body);
             if (patch.profile && ownProfile) {

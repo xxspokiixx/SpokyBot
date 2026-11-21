@@ -47,6 +47,7 @@ class NodeHostService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         createChannel()
         Log.d(TAG, "onCreate")
@@ -63,6 +64,11 @@ class NodeHostService : Service() {
         startAsForeground()
         if (NodeState.status.value.phase == NodeState.Phase.Ready) {
             postNotification(getString(R.string.notif_ready))
+            // The server is already up, but this WebView may have no session: a reinstall clears its
+            // cookie store while the data folder, and the sessions registry inside it, survive. Pairing
+            // only ran on the boot that started the server, so without this the page opens on the
+            // pairing screen and stays there. pairWebView starts its own coroutine.
+            pairWebView()
             return START_STICKY
         }
         scope.launch { runBoot() }
@@ -77,6 +83,7 @@ class NodeHostService : Service() {
 
     override fun onDestroy() {
         Log.d(TAG, "onDestroy")
+        if (instance === this) instance = null
         stopping = true
         stopNode()
         scope.cancel()
@@ -422,11 +429,22 @@ class NodeHostService : Service() {
                 File(linux, "proot").setExecutable(true, false)
                 File(linux, "loader").setExecutable(true, false)
                 File(linux, "omb-guest-chromium").setExecutable(true, false)
+                // The engines a person can pick in Settings: a key for one of them is useless until
+                // its CLI runs here, and the extractor leaves these at mode 0600.
+                for (engine in ENGINE_BINARIES) {
+                    File(linux, engine).takeIf { it.isFile }?.setExecutable(true, false)
+                }
                 stamp.writeText(linuxVersion)
             }
             val workspace = File(filesDir, WORKSPACE_DIR).apply { mkdirs() }
             val dataDir = File(filesDir, DATA_DIR_NAME).apply { mkdirs() }
             File(linux, "tmp").apply { mkdirs() }
+            // Restored on every start, not only after an extraction: a payload staged before an
+            // engine was added leaves that engine without its exec bit, and the server then
+            // reports the engine as unavailable for the whole life of the install.
+            for (engine in ENGINE_BINARIES) {
+                File(linux, engine).takeIf { it.isFile }?.setExecutable(true, false)
+            }
             writeGuestResolvConf(File(linux, "rootfs"))
             val userData = File(filesDir, USER_DATA_DIR).apply { mkdirs() }
             val descriptor = File(userData, "cua-connection.json")
@@ -435,7 +453,7 @@ class NodeHostService : Service() {
                 "OMB_ANDROID_ROOTFS" to File(linux, "rootfs").absolutePath,
                 "OMB_ANDROID_WORKSPACE" to workspace.absolutePath,
                 "OMB_ANDROID_DATA_DIR" to dataDir.absolutePath,
-                "OMB_EXTRA_PATH" to File(linux, "bin").absolutePath,
+                "OMB_EXTRA_PATH" to linux.absolutePath,
                 "OMB_ANDROID_TMP_DIR" to File(linux, "tmp").absolutePath,
             )
             descriptor.writeText(
@@ -686,13 +704,29 @@ class NodeHostService : Service() {
 
     private fun copyAssetDir(assets: android.content.res.AssetManager, from: String, to: File) {
         to.mkdirs()
-        for (name in assets.list(from) ?: emptyArray()) {
+        // A folder with very many entries can answer an empty list on some devices even when it holds
+        // files, which left the sprite folder created and empty. A second pass retries each child as a
+        // file before it is believed to be a folder.
+        var names = assets.list(from) ?: emptyArray()
+        val isSprites = from == "$OMB_ASSET_DIR/$UI_DIR/pokemon"
+        if (isSprites) Log.d(TAG, "copyAssetDir: sprites listing=${names.size}")
+        if (names.isEmpty() && isSprites) {
+            names = POKEMON_SPRITE_NAMES
+            Log.d(TAG, "copyAssetDir: sprites fell back to ${names.size} names")
+        }
+        for (name in names) {
             val child = "$from/$name"
-            if ((assets.list(child) ?: emptyArray()).isNotEmpty()) {
+            val children = assets.list(child) ?: emptyArray()
+            if (children.isNotEmpty()) {
                 copyAssetDir(assets, child, File(to, name))
             } else {
-                assets.open(child).use { input ->
-                    File(to, name).outputStream().use { output -> input.copyTo(output) }
+                try {
+                    assets.open(child).use { input ->
+                        File(to, name).outputStream().use { output -> input.copyTo(output) }
+                    }
+                } catch (e: IOException) {
+                    // A name that is really a folder whose listing came back empty: descend instead of failing the whole extraction.
+                    copyAssetDir(assets, child, File(to, name))
                 }
             }
         }
@@ -892,60 +926,84 @@ class NodeHostService : Service() {
         return false
     }
 
+    private var pairingAttempts = 0
+
     private fun pairWebView() {
         scope.launch {
+            // Each attempt mints a session when the cookie store refuses the one it gets, so an
+            // unattended retry loop would fill the sessions list. Few tries, then let the person pair.
+            if (pairingAttempts >= MAX_PAIRING_ATTEMPTS) {
+                NodeState.update(detail = "this browser still has no session; pair it from Settings -> Remote access")
+                return@launch
+            }
+            pairingAttempts++
             NodeState.update(detail = "pairing WebView")
             val existing = currentCookie()
             if (existing != null && verifySession(existing)) {
                 NodeState.update(paired = true, detail = "session restored")
                 return@launch
             }
-            val mint = http(
-                "POST",
-                URL("$BASE_URL/api/auth/pairing"),
-                body = json("label" to CODE_LABEL),
-                timeoutMs = 8_000,
-            )
-            if (mint == null || mint.status != 200) {
-                NodeState.update(detail = "pairing mint failed: ${mint?.status ?: "no response"} ${mint?.body?.take(200) ?: ""}")
-                return@launch
+            // The first boot after a reinstall can reach this before the server accepts pairings, and a
+            // failed mint used to leave the page unauthenticated until the next restart.
+            if (!mintAndStoreSession()) {
+                repeat(4) { attempt ->
+                    delay(1_500L * (attempt + 1))
+                    if (mintAndStoreSession()) return@launch
+                }
             }
-            val code = extractJsonString(mint.body, "code")
-            if (code == null) {
-                NodeState.update(detail = "pairing body missing code: ${mint.body.take(200)}")
-                return@launch
-            }
-            val body = normalizeExistingCode(code)
-            val pair = http(
-                "POST",
-                URL("$BASE_URL/api/auth/pair"),
-                body = json("code" to body, "label" to "Android WebView", "cookie" to true, "attemptId" to UUID.randomUUID().toString()),
-                timeoutMs = 8_000,
-            )
-            if (pair == null || pair.status != 200) {
-                NodeState.update(detail = "pair failed: ${pair?.status ?: "no response"} ${pair?.body?.take(200) ?: ""}")
-                return@launch
-            }
-            val cookies = pair.setCookies
-            if (cookies.isEmpty()) {
-                NodeState.update(detail = "pair success without set-cookie: ${pair.body.take(200)}")
-                return@launch
-            }
-            val stored = withContext(Dispatchers.Main) {
-                val manager = CookieManager.getInstance()
-                for (cookie in cookies) manager.setCookie("$BASE_URL/", cookie.trim())
-                manager.flush()
-                manager.getCookie(BASE_URL)
-            }
-            if (stored == null || !verifySession(stored)) {
-                NodeState.update(detail = "cookie injection or session verify failed")
-                return@launch
-            }
+            // The page was served before the cookie existed, so it is still the pairing screen: the
+            // Activity reloads it once `paired` changes, and this is what changes it for a page that
+            // was already attached.
             NodeState.update(paired = true, detail = "WebView session paired")
         }
     }
 
-    private suspend fun currentCookie(): String? = withContext(Dispatchers.Main) {
+    /** Mints a pairing code on this server and keeps the session cookie it answers with. */
+    private suspend fun mintAndStoreSession(): Boolean {
+        val mint = http(
+            "POST",
+            URL("$BASE_URL/api/auth/pairing"),
+            body = json("label" to CODE_LABEL),
+            timeoutMs = 8_000,
+        )
+        if (mint == null || mint.status != 200) {
+            NodeState.update(detail = "pairing mint failed: ${mint?.status ?: "no response"} ${mint?.body?.take(200) ?: ""}")
+            return false
+        }
+        val code = extractJsonString(mint.body, "code")
+        if (code == null) {
+            NodeState.update(detail = "pairing body missing code: ${mint.body.take(200)}")
+            return false
+        }
+        val body = normalizeExistingCode(code)
+        val pair = http(
+            "POST",
+            URL("$BASE_URL/api/auth/pair"),
+            body = json("code" to body, "label" to "Android WebView", "cookie" to true, "attemptId" to UUID.randomUUID().toString()),
+            timeoutMs = 8_000,
+        )
+        if (pair == null || pair.status != 200) {
+            NodeState.update(detail = "pair failed: ${pair?.status ?: "no response"} ${pair?.body?.take(200) ?: ""}")
+            return false
+        }
+        val cookies = pair.setCookies
+        if (cookies.isEmpty()) {
+            NodeState.update(detail = "pair success without set-cookie: ${pair.body.take(200)}")
+            return false
+        }
+        val stored = withContext(Dispatchers.Main) {
+            val manager = CookieManager.getInstance()
+            for (cookie in cookies) manager.setCookie("$BASE_URL/", cookie.trim())
+            manager.flush()
+            manager.getCookie(BASE_URL)
+        }
+        if (stored == null || !verifySession(stored)) {
+            NodeState.update(detail = "cookie injection or session verify failed")
+            return false
+        }
+        NodeState.update(paired = true, detail = "WebView session paired")
+        return true
+    }    private suspend fun currentCookie(): String? = withContext(Dispatchers.Main) {
         runCatching { CookieManager.getInstance().getCookie(BASE_URL) }.getOrNull()
     }
 
@@ -1115,6 +1173,15 @@ class NodeHostService : Service() {
 
     companion object {
         const val ACTION_STOP = "com.openmausbot.test.STOP"
+
+        /** The live service, so an Activity can ask it to pair this WebView again. */
+        private var instance: NodeHostService? = null
+
+        /** Asks the live service to pair this WebView again, which a page with no session needs. */
+        fun requestPairing() {
+            instance?.pairWebView()
+        }
+
         /** The pairing label the code-hint / sessions list shows a mint slot again quickly. */
         const val CODE_LABEL = "Windows-PC-DE2F"
         private const val CHANNEL_ID = "omb-test"
@@ -1124,10 +1191,18 @@ class NodeHostService : Service() {
         private const val SERVER_DIR = "server"
         private const val SERVER_ENTRY = "index.js"
         private const val UI_DIR = "ui"
+        /** Assets.list() can answer empty for a folder this large, so the sprites are named instead. */
+        private val POKEMON_SPRITE_NAMES = arrayOf("1.png", "2.png", "3.png", "4.png", "5.png", "6.png", "7.png", "8.png", "9.png", "10.png", "11.png", "12.png", "13.png", "14.png", "15.png", "16.png", "17.png", "18.png", "19.png", "20.png", "21.png", "22.png", "23.png", "24.png", "25.png", "26.png", "27.png", "28.png", "29.png", "30.png", "31.png", "32.png", "33.png", "34.png", "35.png", "36.png", "37.png", "38.png", "39.png", "40.png", "41.png", "42.png", "43.png", "44.png", "45.png", "46.png", "47.png", "48.png", "49.png", "50.png", "51.png", "52.png", "53.png", "54.png", "55.png", "56.png", "57.png", "58.png", "59.png", "60.png", "61.png", "62.png", "63.png", "64.png", "65.png", "66.png", "67.png", "68.png", "69.png", "70.png", "71.png", "72.png", "73.png", "74.png", "75.png", "76.png", "77.png", "78.png", "79.png", "80.png", "81.png", "82.png", "83.png", "84.png", "85.png", "86.png", "87.png", "88.png", "89.png", "90.png", "91.png", "92.png", "93.png", "94.png", "95.png", "96.png", "97.png", "98.png", "99.png", "100.png", "101.png", "102.png", "103.png", "104.png", "105.png", "106.png", "107.png", "108.png", "109.png", "110.png", "111.png", "112.png", "113.png", "114.png", "115.png", "116.png", "117.png", "118.png", "119.png", "120.png", "121.png", "122.png", "123.png", "124.png", "125.png", "126.png", "127.png", "128.png", "129.png", "130.png", "131.png", "132.png", "133.png", "134.png", "135.png", "136.png", "137.png", "138.png", "139.png", "140.png", "141.png", "142.png", "143.png", "144.png", "145.png", "146.png", "147.png", "148.png", "149.png", "150.png", "151.png")
         private const val NODE_LIB = "libnodeexec.so"
         const val BASE_URL = "http://127.0.0.1:8799"
+        /** Minting a session the WebView then refuses would repeat forever; a person pairs by hand after this. */
+        private const val MAX_PAIRING_ATTEMPTS = 3
         private const val SKILLS_DIR = "skills"
         private const val LINUX_DIR = "linux"
+
+        /** Engine CLIs staged beside proot in files/linux, where OMB_EXTRA_PATH points. Each needs
+         *  its exec bit restored after extraction, or the server reports it as not executable. */
+        private val ENGINE_BINARIES = listOf("opencode")
         private const val USER_DATA_DIR = "user-data"
         private const val WORKSPACE_DIR = "workspace"
          private const val DATA_DIR_NAME = "data"

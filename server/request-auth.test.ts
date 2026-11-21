@@ -813,4 +813,15 @@ describe("a browser on this machine is not the owner", () => {
     expect(pick({ OMB_DEV_TRUST_LOCAL_BROWSER: "true" }, { fromSource: true })).toEqual({ trust: "owner", reason: "self-hosted default", localBrowsers: false });
     expect(resolveLoopbackTrust({ env: dev, desktopManaged: false, hostedWorkspace: false, cloudHome: true, fromSource: true }).localBrowsers).toBe(false);
   });
+
+  it("lets the phone app's own page in, because a reinstall clears its cookie store and it has no way to pair", () => {
+    const pick = (flags: Record<string, boolean>, env: NodeJS.ProcessEnv = {}) =>
+      resolveLoopbackTrust({ env, desktopManaged: false, hostedWorkspace: false, ...flags });
+    expect(pick({ androidStandalone: true })).toMatchObject({ trust: "owner", localBrowsers: true });
+    // Nothing is loosened off the phone, or on a shared workspace, or where trust was asked to be service.
+    expect(pick({})).toMatchObject({ localBrowsers: false });
+    expect(pick({ androidStandalone: true, hostedWorkspace: true })).toMatchObject({ trust: "service", localBrowsers: false });
+    expect(pick({ androidStandalone: true }, { OMB_LOOPBACK_TRUST: "service" })).toMatchObject({ trust: "service", localBrowsers: false });
+    expect(pick({ androidStandalone: true, cloudHome: true })).toMatchObject({ localBrowsers: false });
+  });
 });

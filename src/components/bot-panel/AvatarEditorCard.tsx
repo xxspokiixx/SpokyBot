@@ -8,7 +8,8 @@ import { colorSwatch, MAUS_COLOR_LABEL, MAUS_COLOR_NAMES, PICKABLE_STATES, type 
 import type { Bot } from "@/state/store";
 import { MASCOT_BODIES, MASCOT_BODY_IDS } from "../../../shared/mascot-bodies";
 import { HALLOWEEN_BODIES, HALLOWEEN_BODY_IDS } from "../../../shared/halloween-bodies";
-import { isHalloweenBody, type BotBodyId } from "../../../shared/bot-body";
+import { POKEMON_BODIES, POKEMON_BODY_IDS } from "../../../shared/pokemon-bodies";
+import { isHalloweenBody, isPokemonBody, type BotBodyId } from "../../../shared/bot-body";
 import { useHalloweenDressed, wornBody } from "@/lib/halloween-dress";
 import { MausAvatar } from "../Avatar";
 import { AvatarImageGenerator } from "../AvatarImageGenerator";
@@ -68,7 +69,9 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
   const body = bot.mascotBody ?? "cursor";
   const dressed = useHalloweenDressed();
   const costume = wornBody(bot.mascotBody, bot.color, dressed);
-  const [moreLooks, setMoreLooks] = useState(() => dressed || isHalloweenBody(body) || Boolean(bot.mascotExpression && bot.mascotExpression !== "idle"));
+  const [moreLooks, setMoreLooks] = useState(() => dressed || isHalloweenBody(body) || isPokemonBody(body) || Boolean(bot.mascotExpression && bot.mascotExpression !== "idle"));
+  // 151 icons is a wall of them: the section opens on request and remembers nothing, like "More looks".
+  const [pokemonOpen, setPokemonOpen] = useState(() => isPokemonBody(body));
   const dressedAs = costume !== body && isHalloweenBody(costume) ? HALLOWEEN_BODIES[costume].name : null;
   const bodyButton = (id: BotBodyId, name: string) => (
     <button
@@ -175,6 +178,23 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
                 <div className="grid grid-cols-5 gap-1.5" data-halloween-bodies>
                   {HALLOWEEN_BODY_IDS.map((id) => bodyButton(id, HALLOWEEN_BODIES[id].name))}
                 </div>
+                <button
+                  type="button"
+                  data-avatar-pokemon
+                  aria-expanded={pokemonOpen}
+                  onClick={() => setPokemonOpen((open) => !open)}
+                  className="mx-auto mt-2.5 flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] text-ink-secondary hover:bg-ink/[0.04] hover:text-ink"
+                >
+                  {t("botPanel.avatar.pokemon")}
+                  <ChevronDown size={13} aria-hidden="true" className={cn("transition-transform", pokemonOpen && "rotate-180")} />
+                </button>
+                {pokemonOpen && (
+                  <div data-avatar-pokemon-bodies className="max-h-[240px] overflow-y-auto">
+                    <div className="grid grid-cols-5 gap-1.5 pr-1">
+                      {POKEMON_BODY_IDS.map((id) => bodyButton(id, POKEMON_BODIES[id].name))}
+                    </div>
+                  </div>
+                )}
                 <div className="flex flex-wrap items-center justify-center gap-1.5 pt-2.5" role="group" aria-label={t("botPanel.avatar.face")}>
                   <span className="mr-0.5 text-[12px] text-ink-tertiary">{t("botPanel.avatar.face")}</span>
                   {PICKABLE_STATES.map((expression) => (

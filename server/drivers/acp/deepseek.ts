@@ -33,6 +33,7 @@ import type { ModelCatalog } from "../../contracts.ts";
 import { harnessHome } from "../../env-path.ts";
 import { resolveCli } from "../../procs.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { DSH_STANDALONE } from "./dsh-release.ts";
 
 export const DEEPSEEK_MODELS: ModelCatalog = {
   default: "deepseek-official/deepseek-v4-flash",
@@ -296,6 +297,8 @@ export const deepseekSupport: AcpSupport = {
       linux: "npm install -g @deepseek-ai/dsh",
       win32: "npm install -g @deepseek-ai/dsh",
     },
+    // Where no npm runs (the phone), the vendor's own arm64 executable is downloaded instead.
+    standalone: DSH_STANDALONE,
     docsUrl: "https://github.com/deepseek-ai/deepseek-harness",
     needsNode: true,
     // Keyless is "paste a key in Settings", not a terminal sign-in.
@@ -304,6 +307,11 @@ export const deepseekSupport: AcpSupport = {
 
   spawnArgs: () => ["--profile", "acp"],
   credentialEnv: ["DEEPSEEK_API_KEY"],
+  // dsh's ACP server takes MCP servers by URL, and on the phone the stdio ones cannot start: the
+  // engine runs inside the guest, whose own node is 18 while the proxies it would launch are built
+  // for 24, so every stdio server failed and the turn died before the model ran. Reached over
+  // loopback instead, the harness's own servers answer from the server process itself.
+  ownMcpOverHttp: true,
   // Model and reasoning effort are session config options (see header).
   selectModel: { configId: "model" },
   modelVariants: true,

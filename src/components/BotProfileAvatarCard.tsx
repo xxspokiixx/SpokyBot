@@ -1,4 +1,5 @@
-import { ImagePlus, Loader2, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, ImagePlus, Loader2, Trash2 } from "lucide-react";
 
 import type { Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -13,7 +14,9 @@ import {
 import { BOT_AVATAR_CROPS } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, MASCOT_BODY_IDS } from "../../shared/mascot-bodies";
 import { HALLOWEEN_BODIES, HALLOWEEN_BODY_IDS } from "../../shared/halloween-bodies";
-import type { BotBodyId } from "../../shared/bot-body";
+import { POKEMON_BODIES, POKEMON_BODY_IDS } from "../../shared/pokemon-bodies";
+import { DIGIMON_SPRITES } from "../../shared/digimon-sprites";
+import { isPokemonBody, type BotBodyId } from "../../shared/bot-body";
 import { BotAvatar, MausAvatar } from "./Avatar";
 import { AvatarImageGenerator } from "./AvatarImageGenerator";
 import { AvatarFraming, OrganizationAvatarIcons, RESET_MASCOT_PATCH, useAvatarImage, type AvatarPatch } from "./avatar-editing";
@@ -32,6 +35,26 @@ export function BotProfileAvatarCard({
   onPatch: (patch: AvatarPatch) => void;
 }) {
   const { fileRef, crop, uploading, generating, setSavingConnection, busy, error, upload, removeImage, generate } = useAvatarImage(bot, onPatch);
+  // A bot already wearing one opens the section, so its own icon is not lost among 151.
+  const [pokemonOpen, setPokemonOpen] = useState(() => isPokemonBody(bot.mascotBody));
+  const [spritesOpen, setSpritesOpen] = useState(false);
+  const [digimonOpen, setDigimonOpen] = useState(false);
+
+  /** A picture travels the way an uploaded image does: stored once, then named by the bot. */
+  const usePicture = async (url: string, filename: string) => {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(t("botPanel.avatar.spriteFailed"));
+      const blob = await response.blob();
+      const type = url.endsWith(".gif") ? "image/gif" : "image/png";
+      await upload(new File([blob], filename, { type }));
+    } catch {
+      // upload() reports its own failures; a failed fetch means the picture never arrived.
+    }
+  };
+
+  /** The animated sprite when there is one, so the icon the bot keeps is the moving one. */
+  const useSprite = (number: number) => void usePicture(`/pokemon/animated/${number}.gif`, `pokemon-${number}.gif`);
 
   return (
     <div className="overflow-hidden rounded-xl border border-hairline/40 bg-card">
@@ -180,6 +203,101 @@ export function BotProfileAvatarCard({
                 <BodyButton key={id} id={id} name={HALLOWEEN_BODIES[id].name} bot={bot} busy={busy} onPatch={onPatch} />
               ))}
             </div>
+            {/* 151 icons at once would bury the two rows above, so they get a section of their own. */}
+            <button
+              type="button"
+              data-avatar-pokemon
+              aria-expanded={pokemonOpen}
+              onClick={() => setPokemonOpen((open) => !open)}
+              className="mt-4 flex w-full items-center justify-between rounded-lg bg-inset px-3 py-2 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary hover:bg-control hover:text-ink"
+            >
+              {t("botPanel.avatar.pokemon")}
+              <ChevronDown size={14} aria-hidden="true" className={cn("transition-transform", pokemonOpen && "rotate-180")} />
+            </button>
+            {pokemonOpen && (
+              <div data-avatar-pokemon-bodies className="mt-2 max-h-[260px] overflow-y-auto">
+                <div className="grid grid-cols-5 gap-1.5">
+                  {POKEMON_BODY_IDS.map((id) => (
+                    <BodyButton key={id} id={id} name={POKEMON_BODIES[id].name} bot={bot} busy={busy} onPatch={onPatch} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* The original game sprites: a picture of the creature, not a shape wearing the mascot's face. */}
+            <button
+              type="button"
+              data-avatar-sprites
+              aria-expanded={spritesOpen}
+              onClick={() => setSpritesOpen((open) => !open)}
+              className="mt-2 flex w-full items-center justify-between rounded-lg bg-inset px-3 py-2 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary hover:bg-control hover:text-ink"
+            >
+              {t("botPanel.avatar.sprites")}
+              <ChevronDown size={14} aria-hidden="true" className={cn("transition-transform", spritesOpen && "rotate-180")} />
+            </button>
+            {spritesOpen && (
+              <div data-avatar-sprite-bodies className="mt-2 max-h-[280px] overflow-y-auto">
+                <div className="grid grid-cols-5 gap-1.5">
+                  {POKEMON_BODY_IDS.map((id) => (
+                    <button
+                      key={id}
+                      type="button"
+                      disabled={busy}
+                      aria-label={`Use the original ${POKEMON_BODIES[id].name} sprite`}
+                      title={POKEMON_BODIES[id].name}
+                      onClick={() => void useSprite(POKEMON_BODIES[id].number)}
+                      className="flex items-center justify-center rounded-lg py-1.5 hover:bg-control/60 disabled:opacity-50 [image-rendering:pixelated]"
+                    >
+                      {/* The animated set is the same picture in motion; a slow connection falls back to the still frame. */}
+                      <img
+                        src={`/pokemon/animated/${POKEMON_BODIES[id].number}.gif`}
+                        onError={(event) => {
+                          const image = event.currentTarget;
+                          if (!image.dataset.still) { image.dataset.still = "1"; image.src = `/pokemon/${POKEMON_BODIES[id].number}.png`; }
+                        }}
+                        alt=""
+                        width={34}
+                        height={34}
+                        draggable={false}
+                        loading="lazy"
+                        className="size-[34px] object-contain [image-rendering:pixelated]"
+                      />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* The Digimon API has portraits rather than game sprites, so they sit in a section of their own. */}
+            <button
+              type="button"
+              data-avatar-digimon
+              aria-expanded={digimonOpen}
+              onClick={() => setDigimonOpen((open) => !open)}
+              className="mt-2 flex w-full items-center justify-between rounded-lg bg-inset px-3 py-2 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary hover:bg-control hover:text-ink"
+            >
+              {t("botPanel.avatar.digimon")}
+              <ChevronDown size={14} aria-hidden="true" className={cn("transition-transform", digimonOpen && "rotate-180")} />
+            </button>
+            {digimonOpen && (
+              <div data-avatar-digimon-bodies className="mt-2 max-h-[280px] overflow-y-auto">
+                <div className="grid grid-cols-5 gap-1.5">
+                  {DIGIMON_SPRITES.map((digimon) => (
+                    <button
+                      key={digimon.slug}
+                      type="button"
+                      disabled={busy}
+                      aria-label={`Use the ${digimon.name} Digimon`}
+                      title={digimon.name}
+                      onClick={() => void usePicture(`/digimon/${digimon.slug}.png`, `digimon-${digimon.slug}.png`)}
+                      className="flex items-center justify-center rounded-lg py-1.5 hover:bg-control/60 disabled:opacity-50"
+                    >
+                      <img src={`/digimon/${digimon.slug}.png`} alt="" width={34} height={34} draggable={false} loading="lazy" className="size-[34px] object-contain" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         )}
 

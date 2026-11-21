@@ -620,6 +620,15 @@ describe("finding the browser engine", () => {
     }
   });
 
+  it("gives the phone the arm64 Linux build, which its guest is", () => {
+    // Android publishes no engine of its own; the guest is Debian on arm64 and runs this one through proot.
+    const phone = resolveAgentBrowserReleaseAsset("android", "arm64");
+    expect(phone?.target).toBe("linux-musl-arm64");
+    expect(phone).toEqual(resolveAgentBrowserReleaseAsset("linux", "arm64", true));
+    // Nothing else is borrowed, so an x64 phone would still be told there is no build.
+    expect(resolveAgentBrowserReleaseAsset("android", "x64")).toBeNull();
+  });
+
   it("does not reuse a pre-fix Windows managed install for a revised release", () => {
     const dataDir = join(tmpdir(), "omb-versioned-browser-fixture");
     const old = join(dataDir, "tools", "agent-browser", "0.36.0", "agent-browser.exe");

@@ -66,7 +66,11 @@ export function ownerOrAdmin(auth: RequestAuth): boolean {
 }
 
 /** Packaged desktop: `owner`. Else OMB_LOOPBACK_TRUST=owner|service; unset, a hosted workspace (any OMB_ADMIN_*)
- * gets `service` and a headless server `owner`. Any other value fails closed. `localBrowsers`: see localBrowserTrust. */
+ * gets `service` and a headless server `owner`. Any other value fails closed. `localBrowsers`: see localBrowserTrust.
+ *
+ * `androidStandalone` is the phone app: one person, one device, and the WebView showing the page is the app
+ * itself. Its cookie store is cleared by a reinstall while the data folder survives, so the page would be
+ * left on the pairing screen with no way out (minting a code needs a session, and the page has none). */
 export function resolveLoopbackTrust(input: {
   env?: NodeJS.ProcessEnv;
   desktopManaged: boolean;
@@ -75,9 +79,14 @@ export function resolveLoopbackTrust(input: {
   cloudHome?: boolean;
   /** This server runs from TypeScript source rather than a build. */
   fromSource?: boolean;
+  /** The phone app's own server (OMB_ANDROID_STANDALONE=1): its WebView is the app, not a browser a stranger opened. */
+  androidStandalone?: boolean;
 }): { trust: LoopbackTrust; reason: string; warning?: string; localBrowsers: boolean } {
   const resolved = loopbackTrust(input);
-  const browsers = localBrowserTrust(input.env ?? process.env, input.fromSource === true && !input.desktopManaged, resolved.trust);
+  const standalone = input.androidStandalone === true && resolved.trust === "owner";
+  const browsers = standalone
+    ? { trusted: true }
+    : localBrowserTrust(input.env ?? process.env, input.fromSource === true && !input.desktopManaged, resolved.trust);
   const warning = [resolved.warning, browsers.warning].filter(Boolean).join("; ");
   return { trust: resolved.trust, reason: resolved.reason, ...(warning ? { warning } : {}), localBrowsers: browsers.trusted };
 }

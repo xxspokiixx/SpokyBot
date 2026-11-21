@@ -88,6 +88,13 @@ jobs:
       - name: Install pnpm dependencies
         run: pnpm install --frozen-lockfile
 
+      # Before any build: the UI inlines this version and the server bundle copies
+      # it into dist-server, so stamping afterwards ships an APK whose About page
+      # and doctor line name a different build than the one installed.
+      - name: Set the build number
+        id: version
+        run: node scripts/stamp-android-version.mjs
+
       - name: Build web UI and server
         run: pnpm build
 
@@ -119,14 +126,6 @@ jobs:
           # Get APK size
           SIZE=$(stat -c%s "$APK_PATH")
           echo "APK size: $((SIZE / 1024 / 1024)) MB"
-
-      - name: Get version info
-        id: version
-        run: |
-          # Extract version from package.json
-          VERSION=$(node -p "require('./package.json').version")
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
 
       - name: Create or update release
         uses: softprops/action-gh-release@v2

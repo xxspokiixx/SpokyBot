@@ -72,6 +72,9 @@ export function isChromeIdentity(value: unknown): value is ChromeIdentity {
 
 /** agent-browser 0.37 adds --no-sandbox in these same places; a sandboxed Chrome cannot start there. */
 export function needsNoSandbox(env: NodeJS.ProcessEnv = process.env, exists: (path: string) => boolean = existsSync): boolean {
+  // The phone's guest is a proot without user namespaces, which is what Chrome's sandbox needs:
+  // started with one, it exits before answering the DevTools handshake.
+  if (env.OMB_ANDROID_STANDALONE === "1") return true;
   if (process.platform !== "linux") return false;
   return exists("/.dockerenv") || exists("/run/.containerenv") || process.getuid?.() === 0 || Boolean(env.CI);
 }

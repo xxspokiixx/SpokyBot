@@ -13,7 +13,7 @@ import { Worker } from "node:worker_threads";
 import { writeFileAtomic } from "./atomic.ts";
 import { WORKSPACE_BACKUP_CLIENT_KEYS } from "../shared/workspace-backup-client.ts";
 import { INSTRUCTION_FILE, restorePaths, validRelative } from "./workspace-backup-paths.ts";
-import { ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, liveDataEnginePath, managedTaskSkillLink, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
+import { ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, liveDataEnginePath, managedTaskSkillLink, regeneratedVpsSshPath, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
 import type { WorkspaceBackupClientState, WorkspaceBackupPrivateMetadata, WorkspaceBackupSummary, WorkspaceLeftBehind } from "../shared/workspace-backup.ts";
 
 export type { WorkspaceBackupSummary, WorkspaceBackupPrivateMetadata } from "../shared/workspace-backup.ts";
@@ -185,8 +185,8 @@ function assertLocalAuthOutsideSnapshot(dataDir: string): void {
   }
 }
 function passwordKey(password: string, salt: Buffer): Promise<Buffer> {
-  if (typeof password !== "string" || password.length < 1 || Buffer.byteLength(password) > 1024) {
-    throw new Error("Use a backup password of at least 1 character (at most 1024 bytes).");
+  if (typeof password !== "string" || password.length < 1) {
+    throw new Error("Use a backup password of at least 1 character.");
   }
   return new Promise((resolveKey, reject) => {
     scrypt(password, salt, 32, { N: 131_072, r: 8, p: 1, maxmem: 256 * 1024 ** 2 }, (error, key) => {
@@ -313,6 +313,7 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
   let skippedLinks = 0;
   let skippedDependencies = 0;
   let skippedWorkLinks = 0;
+  const skippedUnreadable: string[] = [];
   let copiedLinks = 0;
   try {
     const root = realpathSync(dataDir);
@@ -330,10 +331,22 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
       try { snapshotDb.exec("PRAGMA journal_mode = DELETE"); } finally { snapshotDb.close(); }
     }
     const walk = (directory: string, prefix = "", chain: string[] = [root]) => {
-      for (const name of readdirSync(directory).sort()) {
+      let names: string[];
+      try {
+        names = readdirSync(directory).sort();
+      } catch (error) {
+        // One unreadable folder must not take the whole export with it: the person keeps everything
+        // else, and the summary says what was left out. A phone's own storage refuses some folders
+        // to a shell, and an interrupted copy can leave one with no permissions at all.
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "EACCES" && code !== "EPERM") throw error;
+        skippedUnreadable.push(prefix || ".");
+        return;
+      }
+      for (const name of names) {
         if (!prefix && excluded(name)) continue;
         const path = prefix ? `${prefix}/${name}` : name;
-        if (excludedWorkspaceAuthPath(path) || ephemeralWorkspaceTokenPath(path) || redownloadedOrgLibraryPath(path) || liveDataEnginePath(path)) continue;
+        if (excludedWorkspaceAuthPath(path) || ephemeralWorkspaceTokenPath(path) || redownloadedOrgLibraryPath(path) || liveDataEnginePath(path) || regeneratedVpsSshPath(path)) continue;
         // Reject noncanonical spellings: a case-sensitive host must not export auth paths active on Windows/Mac.
         if (forbiddenArchivePath(path)) throw new Error("A workspace filename conflicts with a protected authentication or runtime path.");
         if (!validRelative(path)) throw new Error(`Cannot back up a name that cannot be restored on every supported platform, such as one with ":" or "\\", a trailing dot or space, or a Windows device name like CON or AUX; rename it first: ${path}`);
@@ -405,6 +418,9 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
     if (skippedDependencies) warnings.push(`${skippedDependencies} installed dependency folder(s) (node_modules) were omitted; reinstall them in the project after restoring.`);
     if (copiedLinks) warnings.push(`${copiedLinks} symbolic link(s) inside a workspace were saved as copies of what they point to; restoring creates regular files and folders there.`);
     if (skippedWorkLinks) warnings.push(`${skippedWorkLinks} symbolic link(s) in conversation work folders were omitted; what they point to is outside this backup.`);
+    if (skippedUnreadable.length) {
+      warnings.push(`${skippedUnreadable.length} folder(s) could not be read and were left out: ${skippedUnreadable.slice(0, 5).join(", ")}${skippedUnreadable.length > 5 ? " and others" : ""}.`);
+    }
     const summary: WorkspaceBackupSummary = {
       format: "openmaus.workspace-backup", version: 1, id: job.id, createdAt: new Date().toISOString(),
       appVersion: options.appVersion ?? "unknown", files: entries.filter((entry) => entry.type === "file").length,
@@ -964,5 +980,5 @@ export function removeWorkspaceBackupJob(dataDir: string, id: string): void {
 }
 
 export function omittedFromWorkspaceBackup(path: string): boolean {
-  return excluded(path.split("/")[0]) || excludedWorkspaceAuthPath(path) || ephemeralWorkspaceTokenPath(path) || redownloadedOrgLibraryPath(path) || liveDataEnginePath(path);
+  return excluded(path.split("/")[0]) || excludedWorkspaceAuthPath(path) || ephemeralWorkspaceTokenPath(path) || redownloadedOrgLibraryPath(path) || liveDataEnginePath(path) || regeneratedVpsSshPath(path);
 }

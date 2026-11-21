@@ -846,6 +846,23 @@ describe("default fleet", () => {
     expect(env).toEqual({ KEEP: "yes" });
   });
 
+  it("adds NVIDIA NIM to product fleets from the key alone and keeps that key away from other accounts", () => {
+    // One key and nothing else: the engine, its endpoint and its models already exist.
+    expect(instanceConfigs({ nvidia: { key: "nvapi-only" } }).nvidia)
+      .toEqual({ driver: "nvidia-nim", environment: { NVIDIA_API_KEY: "nvapi-only" } });
+    const cfg: AppConfig = { nvidia: { key: "nvapi-workspace", url: "https://proxy.example.test/v1" }, instances: {
+      codex: { driver: "codex" },
+      nvidiaProxy: { driver: "nvidia-nim", config: { url: "https://another.example.test/v1" } },
+      nvidiaOwn: { driver: "nvidia-nim", environment: { NVIDIA_API_KEY: "nvapi-own" } },
+    } };
+    const map = instanceConfigs(cfg);
+    expect(map.nvidia).toEqual({ driver: "nvidia-nim", config: { url: cfg.nvidia!.url }, environment: { NVIDIA_API_KEY: "nvapi-workspace" } });
+    expect(map.codex.environment).toEqual({});
+    expect(map.nvidiaProxy.environment).toEqual({});
+    expect(map.nvidiaOwn.environment).toEqual({ NVIDIA_API_KEY: "nvapi-own" });
+    expect(cfg.instances).not.toHaveProperty("nvidia");
+  });
+
   it("adds Meta to product fleets and keeps its workspace key away from other accounts", () => {
     const cfg: AppConfig = { meta: { key: "meta-workspace", url: "https://proxy.example.test/v1" }, instances: {
       codex: { driver: "codex" },

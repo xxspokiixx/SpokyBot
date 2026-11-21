@@ -66,6 +66,13 @@ export function liveDataEnginePath(path: string): boolean {
   return /^bots\/[^/]+\/(?:data\.duckdb(?:\.wal)?$|data-tmp(?:\/|$))/.test(path);
 }
 
+/** The VPS ssh shim and its config name this device's own data folder, and both are written again at every
+ *  start (vps-ssh.ts). A restored copy would point at a folder that does not exist here, and reading the
+ *  shim is what made an export fail with EACCES on the phone. */
+export function regeneratedVpsSshPath(path: string): boolean {
+  return /^ssh\/(?:config|bin(?:\/|$))/.test(path);
+}
+
 /** Read the link text, never follow it. A link points at the bot's own skill, or at the same-named skill brought in
  * from this computer (imported-skills.ts), which the backup carries. */
 export function managedTaskSkillLink(source: string, path: string, roots: string[]): boolean {

@@ -200,7 +200,14 @@ if (existsSync(sshDir)) {
   }
 }
 
-const serverHash = hash8(join(distServer, "index.js"));
+// The bundle's own package.json carries the version the server reports, so it is
+// part of the stamp: a rebuild that changes only that file (a new build number)
+// must still look different here, or the app keeps the bundle it already has.
+const serverHash = createHash("sha256")
+  .update(readFileSync(join(distServer, "index.js")))
+  .update(readFileSync(join(distServer, "package.json")))
+  .digest("hex")
+  .slice(0, 8);
 const uiHash = hashTree(distUi);;
 // Names+sizes of the linux payload (recursive; content hashes of a 29 MB tarball per
 // run would cost seconds for no extra safety — a payload that changes almost always
@@ -240,9 +247,6 @@ function pkgVersion() {
   return JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version;
 }
 
-function hash8(file) {
-  return createHash("sha256").update(readFileSync(file)).digest("hex").slice(0, 8);
-}
 function hashTree(dir) {
   const files = [];
   function walk(d) {

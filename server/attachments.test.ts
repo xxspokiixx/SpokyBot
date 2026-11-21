@@ -1,5 +1,6 @@
 import {
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -22,15 +23,17 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 vi.mock("node:fs", async (importOriginal) => {
   const fs = await importOriginal<typeof import("node:fs")>();
-  return { ...fs, unlinkSync: vi.fn(fs.unlinkSync), writeFileSync: vi.fn(fs.writeFileSync) };
+  return { ...fs, linkSync: vi.fn(fs.linkSync), unlinkSync: vi.fn(fs.unlinkSync), writeFileSync: vi.fn(fs.writeFileSync) };
 });
 const realUnlink = (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")).unlink;
 const realLink = (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")).link;
+const realLinkSync = (await vi.importActual<typeof import("node:fs")>("node:fs")).linkSync;
 const realUnlinkSync = (await vi.importActual<typeof import("node:fs")>("node:fs")).unlinkSync;
 const realWriteFileSync = (await vi.importActual<typeof import("node:fs")>("node:fs")).writeFileSync;
 afterEach(() => {
   vi.mocked(unlink).mockReset().mockImplementation(realUnlink);
   vi.mocked(link).mockReset().mockImplementation(realLink);
+  vi.mocked(linkSync).mockReset().mockImplementation(realLinkSync);
   vi.mocked(unlinkSync).mockReset().mockImplementation(realUnlinkSync);
   vi.mocked(writeFileSync).mockReset().mockImplementation(realWriteFileSync);
 });
@@ -124,6 +127,32 @@ describe("saveImage", () => {
     expect(() => saveImage(Buffer.from("x"), "image/svg+xml")).toThrow(/unsupported image type/);
     expect(() => saveImage(Buffer.alloc(0), "image/png")).toThrow(/empty/);
     expect(() => saveImage(Buffer.alloc(IMAGE_MAX_BYTES + 1), "image/png")).toThrow(/exceeds/);
+  });
+
+  it("saves without a hard link, so a phone whose storage refuses link(2) still takes a photo", () => {
+    // Android's app storage answers EACCES for link(2): every avatar and profile picture failed.
+    const refuses = vi.mocked(linkSync).mockImplementation(() => {
+      throw Object.assign(new Error("EACCES: permission denied, link"), { code: "EACCES" });
+    });
+    try {
+      const saved = saveImage(Buffer.from("png-bytes"), "image/png");
+      expect(readFileSync(saved.path, "utf8")).toBe("png-bytes");
+      expect(readdirSync(ATTACHMENTS_DIR)).toEqual([saved.path.split(/[\\/]/).pop()!]);
+    } finally {
+      refuses.mockReset().mockImplementation(realLinkSync);
+    }
+  });
+
+  it("still refuses to reuse an upload id for different bytes when the link is refused", () => {
+    const refuses = vi.mocked(linkSync).mockImplementation(() => {
+      throw Object.assign(new Error("EACCES: permission denied, link"), { code: "EACCES" });
+    });
+    try {
+      saveImage(Buffer.from("same"), "image/png", UPLOAD_A);
+      expect(() => saveImage(Buffer.from("different"), "image/png", UPLOAD_A)).toThrow(/different image bytes/);
+    } finally {
+      refuses.mockReset().mockImplementation(realLinkSync);
+    }
   });
 
   it("makes UUID-keyed image retries idempotent without changing legacy callers", () => {

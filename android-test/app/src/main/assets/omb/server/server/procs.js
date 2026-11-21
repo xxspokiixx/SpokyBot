@@ -158,7 +158,9 @@ export function boxedSpawn(resolved, opts, owner, homed = null) {
     return botBox.wrap({ command: resolved.command, args: resolved.args, cwd: typeof opts.cwd === "string" ? opts.cwd : undefined, env: opts.env ?? process.env, ...request, ...home });
 }
 export function spawnCli(cli, args, opts, owner = "openmausbot") {
-    const resolved = resolveCli(cli, args);
+    // The guest decision needs the environment this CLI will actually run in: on the phone that is
+    // what carries OMB_ANDROID_STANDALONE, and a wrapper resolved without it never applies.
+    const resolved = resolveCli(cli, args, opts.env);
     assertSafeCliArgv(resolved);
     const homed = owner === "bot" || opts.engineHome ? engineHomes.forSpawn(opts.env ?? process.env) : null;
     const options = homed ? { ...opts, env: homed.env } : opts;
@@ -208,7 +210,8 @@ export function spawnCli(cli, args, opts, owner = "openmausbot") {
 }
 const EXEC_KILL_GRACE_MS = 2_000;
 export function execCli(cli, args, opts, cb) {
-    const resolved = resolveCli(cli, args);
+    // Same reason as spawnCli: the probe of an engine on the phone has to resolve through the guest.
+    const resolved = resolveCli(cli, args, opts.env);
     try {
         assertSafeCliArgv(resolved);
     }

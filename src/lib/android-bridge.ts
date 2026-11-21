@@ -13,6 +13,9 @@ export interface AndroidBridge {
   download(url: string, filename: string, mimeType: string): void;
   downloadBase64(filename: string, mimeType: string, base64: string): void;
   saveBackup(url: string, filename: string): void;
+  /** Native dictation, the phone's stand-in for the desktop's speech helper. */
+  speechStart?(): boolean;
+  speechStop?(): void;
 }
 
 export function androidBridge(): AndroidBridge | null {
