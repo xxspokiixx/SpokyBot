@@ -7,7 +7,7 @@ import { delimiter, dirname, join, resolve } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { androidGuest, guestInvocation } from "./android-guest.ts";
-import { CHROMIUM_BINARY, guestChromiumReady } from "./android-chromium.ts";
+import { CHROMIUM_BINARY, guestChromiumReady, guestSocketDir } from "./android-chromium.ts";
 import { DATA_DIR } from "./config.ts";
 import { browserBundlePaths } from "./browser-bundle-release.ts";
 import { browserProcessesRunning, browserProcessTree, releaseBrowserProfile, stopBrowserProcesses } from "./browser-processes.ts";
@@ -628,7 +628,14 @@ export function agentBrowserIntegration(input: {
   // The phone has no browser of its own; the guest does, at the path the wrapper execs. The engine
   // runs inside that guest too, so it names Chrome as the guest sees it.
   const guest = androidGuest(sourceEnv);
-  if (guest && guestChromiumReady(guest)) env.AGENT_BROWSER_EXECUTABLE_PATH = `/${CHROMIUM_BINARY}`;
+  if (guest && guestChromiumReady(guest)) {
+    env.AGENT_BROWSER_EXECUTABLE_PATH = `/${CHROMIUM_BINARY}`;
+    // The engine keeps a control socket at <dir>/<session>.socket and refuses a path over 103 bytes. The phone's own
+    // data dir is long enough that "bot-<uuid>" alone pushes it past, and the guest's /tmp is not writable from the
+    // engine's own process, so the socket goes to a short folder beside the app's data.
+    env.AGENT_BROWSER_SOCKET_DIR = guestSocketDir(guest);
+    try { mkdirSync(env.AGENT_BROWSER_SOCKET_DIR, { recursive: true }); } catch {}
+  }
   // The gate goes last, so nothing the launcher sets can route Chrome around it; launcher arguments are kept beside its own.
   if (!input.attach) {
     const launch = { ...env, ...input.launcher };

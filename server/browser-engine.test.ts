@@ -7,6 +7,7 @@ import { delimiter, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { credentialStoreFlags } from "./browser/egress/gate.ts";
+import { CHROMIUM_BINARY } from "./android-chromium.ts";
 import { browserRoot } from "./browser/chrome/profile.ts";
 import { strays } from "./browser/chrome/processes.ts";
 import {
@@ -1016,6 +1017,31 @@ describe("what a bot gets", () => {
     expect(agentBrowserIntegration({ ...linux, headless: false, env: { PATH: "/usr/bin", DISPLAY: ":0" } }).env.AGENT_BROWSER_HEADED).toBeUndefined();
     expect(agentBrowserIntegration({ ...linux, headless: false, env: { PATH: "/usr/bin", WAYLAND_DISPLAY: "wayland-0" } }).env.AGENT_BROWSER_HEADED).toBeUndefined();
     expect(agentBrowserIntegration({ ...linux, platform: "darwin", headless: false }).env.AGENT_BROWSER_HEADED).toBeUndefined();
+  });
+
+  it("gives the phone a socket folder its bot session fits in, since the app's own path does not", () => {
+    // The phone's HOME is the app's data dir, and "<HOME>/.agent-browser/bot-<uuid>.socket" is longer than the engine's
+    // 103-byte limit, which failed every browser call on the device with "session name is too long".
+    const linuxDir = "/data/user/0/com.openmausbot.test/files/linux";
+    const dataDir = "/data/user/0/com.openmausbot.test/files/data";
+    const rootfs = join(linuxDir, "rootfs");
+    mkdirSync(join(rootfs, "usr", "lib", "chromium"), { recursive: true });
+    writeFileSync(join(rootfs, CHROMIUM_BINARY), "binary");
+    mkdirSync(join(rootfs, "usr", "lib", "aarch64-linux-gnu"), { recursive: true });
+    for (const library of ["libnss3.so", "libgbm.so.1"]) writeFileSync(join(rootfs, "usr", "lib", "aarch64-linux-gnu", library), "lib");
+    const session = "bot-07cefc48-182b-41ff-a28e-f6130178f7b5";
+    const spec = agentBrowserIntegration({
+      binaryPath: "/x/agent-browser", session, encryptionKey: "k",
+      env: {
+        PATH: "/usr/bin", HOME: dataDir, OMB_ANDROID_STANDALONE: "1",
+        OMB_ANDROID_LINUX_DIR: linuxDir, OMB_ANDROID_ROOTFS: rootfs, OMB_ANDROID_DATA_DIR: dataDir,
+      },
+    });
+    const socketDir = spec.env.AGENT_BROWSER_SOCKET_DIR!;
+    // The phone's paths are POSIX whatever machine runs this code.
+    expect(socketDir).toBe("/data/user/0/com.openmausbot.test/files/ab");
+    expect(`${socketDir}/${session}.socket`.length).toBeLessThanOrEqual(103);
+    expect(`${dataDir}/.agent-browser/${session}.socket`.length).toBeGreaterThan(103);
   });
 
   it("keeps saved state separate for different bots and never saves guest state", () => {

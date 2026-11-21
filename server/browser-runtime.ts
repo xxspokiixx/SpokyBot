@@ -1,4 +1,7 @@
 import { killCliTree, spawnCli } from "./procs.ts";
+import { androidGuest } from "./android-guest.ts";
+import { guestSocketDir } from "./android-chromium.ts";
+import { mkdirSync } from "node:fs";
 import { scrubHeldSecrets } from "../shared/redact.ts";
 import { DEFAULT_BROWSER_RESULT_BUDGET, describePageChange, OBSERVE_PAGE_SCRIPT, parsePageState, READ_OPEN_PAGE_ONLY, readsAroundBrowser, scrubBrowserResult, shapeBrowserToolResult, slimBrowserToolList, stripHarnessOwnedArguments, type PageState } from "./browser-tool-shape.ts";
 import { BrowserLanes } from "./browser-lane.ts";
@@ -68,7 +71,16 @@ const HOST_ENV = ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PATH", "Pat
 /** One env for MCP, viewer and cleanup so they share HOME/socket paths: OS plumbing, never provider credentials. */
 export function browserRuntimeEnv(overrides: Record<string, string | undefined>): NodeJS.ProcessEnv {
   const env = Object.fromEntries(HOST_ENV.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
-  return { ...env, ...overrides };
+  const merged = { ...env, ...overrides };
+  // The phone's own HOME is too long for the engine's 103-byte socket path, so every caller that names only a session
+  // still needs the short folder; without this, cleanup and viewer paths read a socket the engine never used.
+  const guest = androidGuest(process.env);
+  if (guest && !merged.AGENT_BROWSER_SOCKET_DIR) {
+    const dir = guestSocketDir(guest);
+    try { mkdirSync(dir, { recursive: true }); } catch {}
+    merged.AGENT_BROWSER_SOCKET_DIR = dir;
+  }
+  return merged;
 }
 
 export function attachesToChrome(env: NodeJS.ProcessEnv): boolean {

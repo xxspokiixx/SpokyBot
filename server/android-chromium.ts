@@ -33,6 +33,18 @@ const UNPACK = `export DEBIAN_FRONTEND=noninteractive TMPDIR=/tmp; ` +
 
 let installing: Promise<boolean> | null = null;
 
+/** Where agent-browser keeps its control sockets on the phone.
+ *
+ *  The engine refuses a socket path over 103 bytes, and the app's own data dir plus a bot's session id is longer than
+ *  that. This folder is short, sits beside data, and the app owns it, so the engine can create the socket in it. */
+export function guestSocketDir(guest: AndroidGuestConfig): string {
+  // The phone's paths are POSIX whatever machine runs this code.
+  if (!guest.dataDir) return `${guest.linuxDir.replaceAll("\\", "/")}/tmp/ab`;
+  const normalized = guest.dataDir.replaceAll("\\", "/");
+  const cut = normalized.lastIndexOf("/");
+  return cut > 0 ? `${normalized.slice(0, cut)}/ab` : `${normalized}/ab`;
+}
+
 /** Whether this guest can start a browser right now: the binary and the eleven libraries it links. */
 export function guestChromiumReady(guest: AndroidGuestConfig): boolean {
   if (!existsSync(join(guest.rootfs, CHROMIUM_BINARY))) return false;

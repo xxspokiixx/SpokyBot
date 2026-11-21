@@ -36,6 +36,13 @@ describe("t", () => {
     expect(t("engines.cloud")).toBe("Cloud");
   });
 
+  it("answers with the key instead of taking the page down when this build has no such string", () => {
+    // A newer server can send a Works on value this build predates: the lookup finds no template, and reading
+    // .includes on it threw "Cannot read properties of undefined", blanking the whole app.
+    expect(t("place.never-heard-of-it" as never)).toBe("place.never-heard-of-it");
+    expect(t("place.also-unknown" as never, { app: "Acme" })).toBe("place.also-unknown");
+  });
+
   it("fills {app} with the product's name, a white-label brand's own name, or the name a caller passes", () => {
     expect(t("routines.runsOn.localHint")).toBe("Starts while MausBot is open here.");
     expect(t("routines.runsOn.localHint", { app: "Acme" })).toBe("Starts while Acme is open here.");

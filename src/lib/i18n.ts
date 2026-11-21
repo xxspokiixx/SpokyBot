@@ -72,9 +72,12 @@ export function tFromServer(key: string | undefined, fallback: string | undefine
   return key && Object.hasOwn(en, key) ? t(key as LocaleKey) : fallback;
 }
 
-/** `{app}` is the product's name as a person reads it (productName) unless `params` names it. */
+/** `{app}` is the product's name as a person reads it (productName) unless `params` names it. A key no pack carries
+ *  answers with the key itself: a value this build does not know, such as a newer server's Works on choice, must not
+ *  take the whole page down. */
 export function t(key: LocaleKey, params?: Record<string, string | number>): string {
   const template = activePack[key] ?? en[key];
+  if (typeof template !== "string") return String(key);
   if (!params && !template.includes("{app}")) return template;
   return template.replace(/\{(\w+)\}/g, (match, name: string) =>
     params && name in params ? String(params[name]) : name === "app" ? productName() : match,

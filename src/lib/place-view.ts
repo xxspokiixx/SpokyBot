@@ -168,5 +168,6 @@ export const SIMPLE_PLACE_LABEL = {
 
 export function worksOnSimpleLabel(computer: Bot["computer"], platform: DesktopCapabilities["host"]["platform"]): string {
   if (computer === "local") return t(platform === "darwin" ? "computer.simple.dest.thisMac" : "computer.simple.dest.thisPc");
-  return t(SIMPLE_PLACE_LABEL[computer ?? "auto"]);
+  // A server newer than this build can name a place this one does not list; naming it as Auto keeps the page usable.
+  return t(SIMPLE_PLACE_LABEL[computer ?? "auto"] ?? SIMPLE_PLACE_LABEL.auto);
 }

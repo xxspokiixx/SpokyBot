@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { CHROMIUM_BINARY, ensureGuestChromium, guestChromiumReady } from "./android-chromium.ts";
+import { CHROMIUM_BINARY, ensureGuestChromium, guestChromiumReady, guestSocketDir } from "./android-chromium.ts";
 
 const roots: string[] = [];
 function guest(withChromium: boolean) {
@@ -51,3 +51,23 @@ describe("the phone's Chromium", () => {
     expect(guestChromiumReady(config)).toBe(false);
   });
 });
+
+describe("where the phone's browser engine keeps its sockets", () => {
+  it("names a folder short enough for a bot's session under the 103-byte limit", () => {
+    const config = guest(true);
+    const dataDir = join(config.linuxDir, "..", "data");
+    const dir = guestSocketDir({ ...config, dataDir });
+    // Same folder the app owns: beside data, not inside it, so the session id has room.
+    expect(dir.endsWith("/ab")).toBe(true);
+    expect(dir).not.toContain("/data/");
+    const socket = `${dir}/bot-07cefc48-182b-41ff-a28e-f6130178f7b5.socket`;
+    // The phone's own data dir is long enough to push this over on its own, which failed every browser call.
+    expect(`${dataDir.replaceAll("\\\\", "/")}/bot-07cefc48-182b-41ff-a28e-f6130178f7b5.socket`.length)
+      .toBeGreaterThan(socket.length);
+  });
+
+  it("falls back inside the linux dir when there is no data dir to sit beside", () => {
+    const config = guest(true);
+    // The phone's paths are POSIX whatever machine runs this code.
+    expect(guestSocketDir(config)).toBe(`${config.linuxDir.replaceAll("\\", "/")}/tmp/ab`);
+  });});
