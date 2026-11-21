@@ -22,9 +22,22 @@ static void fail(const char *message) {
 
 int main(int argc, char **argv) {
     // The harness's browser runtime env passes an allowlist that grew before this
-    // lane existed; the app's files dir is stable across installs, so it stands in.
+    // lane existed, so the variable can be missing. This binary knows where it lives:
+    // /data/user/0/<package>/files/linux/omb-guest-chromium, so its own path names the
+    // linux dir. A fixed path here pointed at another package and read as
+    // "exec of proot failed" on every launch.
     const char *linux_dir = getenv("OMB_ANDROID_LINUX_DIR");
-    if (!linux_dir || !*linux_dir) linux_dir = "/data/user/0/com.openmausbot.localtest/files/linux";
+    static char own_dir[4096];
+    if (!linux_dir || !*linux_dir) {
+        ssize_t n = readlink("/proc/self/exe", own_dir, sizeof own_dir - 1);
+        if (n > 0) {
+            own_dir[n] = 0;
+            char *slash = strrchr(own_dir, '/');
+            if (slash) *slash = 0;
+            linux_dir = own_dir;
+        }
+    }
+    if (!linux_dir || !*linux_dir) linux_dir = "/data/user/0/com.openmausbot.test/files/linux";
     snprintf(proot, sizeof proot, "%s/proot", linux_dir);
     snprintf(rootfs, sizeof rootfs, "%s/rootfs", linux_dir);
     snprintf(loader, sizeof loader, "%s/loader", linux_dir);
