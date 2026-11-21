@@ -1,8 +1,11 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Readable, Writable } from "node:stream";
 
 import { spawnBotWork } from "../../oom-score.ts";
-import { pipeTransport, type CdpTransport } from "../cdp/transport.ts";
+import { androidGuest, guestInvocation, guestWorkspacePath } from "../../android-guest.ts";
+import { pipeTransport, webSocketTransport, type CdpTransport } from "../cdp/transport.ts";
 import { chromeArgs, chromeEnv, type ChromeEnvInput, type ChromeFlagsInput } from "./flags.ts";
 import { diagnoseLaunchFailure } from "./host-setup.ts";
 import type { ProcessRegistry } from "./processes.ts";
@@ -95,16 +98,43 @@ function handshake(transport: CdpTransport, exited: Promise<ChromeExit>, timeout
   });
 }
 
-/** Starts Chrome on --remote-debugging-pipe (fd 3 to Chrome, fd 4 back) and waits until it answers. */
+/** Chrome on the phone reports its DevTools endpoint in the profile folder, since proot cannot carry the pipe's
+ *  extra descriptors. The first line is the port, the second the browser target's path. */
+async function devToolsPortTransport(userDataDir: string, exited: Promise<ChromeExit>, timeoutMs: number): Promise<CdpTransport> {
+  const file = join(userDataDir, "DevToolsActivePort");
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      const [port, path] = readFileSync(file, "utf8").split("\n");
+      const number = Number(port);
+      if (Number.isInteger(number) && number > 0 && path?.trim()) {
+        return await webSocketTransport(`ws://127.0.0.1:${number}${path.trim()}`);
+      }
+    } catch {
+      // Not written yet: Chrome creates the file once its DevTools listener is up.
+    }
+    if (Date.now() > deadline) throw new Error("Chrome did not open its DevTools port in time.");
+    await Promise.race([
+      exited.then((exit) => { throw new Error(`Chrome exited before opening its DevTools port (${exit.signal ?? `code ${exit.code}`}).`); }),
+      new Promise((resolve) => setTimeout(resolve, 250)),
+    ]);
+  }
+}
 export async function launchChrome(options: LaunchOptions): Promise<ChromeProcess> {
-  const argv = chromeArgs(options);
+  // On the phone the browser is the guest's own Chromium, reached through proot: the wrapper cannot
+  // carry the extra descriptors Chrome's DevTools pipe rides on, so the launch names a loopback port
+  // instead, and the profile is addressed by the guest's name for it.
+  const phone = androidGuest(options.env ?? process.env);
+  const profileDir = phone ? guestWorkspacePath(options.userDataDir, options.env ?? process.env) : options.userDataDir;
+  const argv = chromeArgs({ ...options, userDataDir: profileDir });
   const env = chromeEnv(options.env ?? process.env, {
     host: options.host,
     timezone: options.timezone ?? null,
     sandboxHelper: options.sandboxHelper ?? null,
     profileMarker: options.profileMarker ?? null,
   });
-  const child = spawnBotWork(() => spawn(options.executablePath, argv, { stdio: ["ignore", "pipe", "pipe", "pipe", "pipe"], env, windowsHide: true }));
+  const launch = guestInvocation(options.executablePath, argv, options.env ?? process.env);
+  const child = spawnBotWork(() => spawn(launch.command, launch.args, { stdio: ["ignore", "pipe", "pipe", "pipe", "pipe"], env: launch.env, windowsHide: true }));
   let output = "";
   const keep = (chunk: Buffer) => {
     output = (output + chunk.toString("utf8")).slice(-OUTPUT_LIMIT);
@@ -120,7 +150,10 @@ export async function launchChrome(options: LaunchOptions): Promise<ChromeProces
   });
   const pid = child.pid;
   if (pid !== undefined) void exited.then(() => options.registry?.remove(pid));
-  const transport = pipeTransport(child.stdio[3] as Writable, child.stdio[4] as Readable);
+  const onPhone = launch.command !== options.executablePath;
+  const transport = onPhone
+    ? await devToolsPortTransport(options.userDataDir, exited, options.handshakeTimeoutMs ?? 60_000)
+    : pipeTransport(child.stdio[3] as Writable, child.stdio[4] as Readable);
   let version: BrowserVersion;
   try {
     if (pid !== undefined) options.registry?.add({ pid, startTime: null, userDataDir: options.userDataDir, ownerPid: process.pid, launchedAt: new Date().toISOString() });

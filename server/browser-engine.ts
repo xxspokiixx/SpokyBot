@@ -6,7 +6,8 @@ import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
-import { guestInvocation } from "./android-guest.ts";
+import { androidGuest, guestInvocation } from "./android-guest.ts";
+import { CHROMIUM_BINARY, guestChromiumReady } from "./android-chromium.ts";
 import { DATA_DIR } from "./config.ts";
 import { browserBundlePaths } from "./browser-bundle-release.ts";
 import { browserProcessesRunning, browserProcessTree, releaseBrowserProfile, stopBrowserProcesses } from "./browser-processes.ts";
@@ -624,12 +625,24 @@ export function agentBrowserIntegration(input: {
   if (!env.AGENT_BROWSER_EXECUTABLE_PATH && bundle && resolve(input.binaryPath) === bundle.engine && completePackage(bundle, existsSync)) {
     env.AGENT_BROWSER_EXECUTABLE_PATH = bundle.chrome;
   }
+  // The phone has no browser of its own; the guest does, at the path the wrapper execs. The engine
+  // runs inside that guest too, so it names Chrome as the guest sees it.
+  const guest = androidGuest(sourceEnv);
+  if (guest && guestChromiumReady(guest)) env.AGENT_BROWSER_EXECUTABLE_PATH = `/${CHROMIUM_BINARY}`;
   // The gate goes last, so nothing the launcher sets can route Chrome around it; launcher arguments are kept beside its own.
   if (!input.attach) {
     const launch = { ...env, ...input.launcher };
     // A kept profile's disk cache would otherwise grow to Chrome's default of several hundred megabytes per profile.
     if (env.AGENT_BROWSER_PROFILE) launch.AGENT_BROWSER_ARGS = [launch.AGENT_BROWSER_ARGS, PROFILE_CACHE_ARG].filter(Boolean).join("\n");
     Object.assign(env, input.launcher, agentBrowserEgressEnv(launch, input.egressPort ?? 0, input.platform ?? process.platform));
+  }
+  // On the phone the engine is an arm64 Linux build that only the guest can run, so the command the
+  // MCP client starts is proot rather than the binary itself; its own arguments stay the same.
+  if (guest) {
+    const defined = Object.fromEntries(Object.entries(env).filter(([, value]) => typeof value === "string")) as Record<string, string>;
+    const launch = guestInvocation(input.binaryPath, ["mcp", "--tools", "core", "--no-webmcp"], defined);
+    const launched = Object.fromEntries(Object.entries(launch.env).filter(([, value]) => typeof value === "string")) as Record<string, string>;
+    return { command: launch.command, args: launch.args, env: launched };
   }
   return { command: input.binaryPath, args: ["mcp", "--tools", "core", "--no-webmcp"], env };
 }

@@ -446,7 +446,7 @@ import { browserEvidence, stepContext } from "./browser-steps.ts";
 import { parseLoginFields, parseTotpField, createLoginRoutes } from "./routes/logins.ts";
 import { loginSite } from "../shared/logins.ts";
 import { browserRestartRefusal } from "./browser-live.ts";
-import { browserEngineStatus } from "./browser-engine.ts";
+import { browserEngineStatus, installAgentBrowserBinary } from "./browser-engine.ts";
 import { chromeLauncher } from "./browser/chrome/launcher.ts";
 import { androidGuest } from "./android-guest.ts";
 import { ensureGuestChromium, guestChromiumReady } from "./android-chromium.ts";
@@ -2516,6 +2516,24 @@ function highlevelIntegration(bot: BotRecord, turn: { threadId: string; generati
 
 let browserEngineInstall: Promise<void> | null = null;
 let browserEngineInstallError: string | null = null;
+
+/** Downloads agent-browser once, at most once per process: a failed attempt is not retried on every start. */
+async function installBrowserEngineOnce(): Promise<void> {
+  if (browserEngineInstall) return browserEngineInstall;
+  if (browserEngineInstallError) return;
+  browserEngineInstall = (async () => {
+    try {
+      const binary = await installAgentBrowserBinary({ log: (line) => console.log(`browser engine: ${line}`) });
+      console.log(`browser engine: installed ${binary}`);
+    } catch (error) {
+      browserEngineInstallError = error instanceof Error ? error.message : String(error);
+      console.log(`browser engine: not installed (${browserEngineInstallError})`);
+    } finally {
+      browserEngineInstall = null;
+    }
+  })();
+  return browserEngineInstall;
+}
 export function browserEngineSummary(): { kind: "engine" | "unavailable"; reason?: string; installable?: boolean; version?: string; chrome?: string; installing?: boolean; installError?: string; myChrome: boolean; myChromeOn?: { name: string; device: "PC" | "Mac" | "computer"; online: boolean }; myChromeLendable?: true; engine: "agent-browser" | "chrome" } {
   const status = browserEngineStatus();
   const progress = { myChrome: myChromeAvailable(), ...lentChromeSummary(), ...(browserEngineInstall ? { installing: true } : {}), ...(browserEngineInstallError ? { installError: browserEngineInstallError } : {}) };
@@ -15763,15 +15781,16 @@ server.listen(PORT, "127.0.0.1", async () => {
   companyRuntimeReady();
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
   browserSweep.start(); startCloudTeamPolicy({ cloudHome: CLOUD_HOME, dataDir: DATA_DIR, managed: managedPolicy, sessions }); moveFreeze.hold(() => appTriggers.start(), () => void appTriggers.stop()); startCloudHomeConnectedApps({ cloudHome: CLOUD_HOME !== null, dataDir: DATA_DIR, cloudGrant: CLOUD_ENV.OMB_CLOUD_CONNECTED_APPS_GRANT, apply: (access) => { composio.setManagedBrokerAccess(access); broadcast({ kind: "config", ...configStatus() }); } });
-  void afterFirstEngineRead().then(() => {
-    if (!builtInBrowserEnabled(cfg)) return;
-    // The phone's rootfs carries no browser, and no APK should carry 300 MB of one: it is fetched
-    // once on the device, then the launcher starts against it.
+  void afterFirstEngineRead().then(async () => {
+    if (!builtInBrowserEnabled(cfg)) { console.log("browser: the built-in browser is switched off in settings"); return; }
+    // A desktop install fetches the engine on demand, when the person first opens a browser. The
+    // phone cannot: its rootfs carries no browser, and its Chromium plus agent-browser are the whole
+    // of what a turn needs, so they are fetched once here and the launcher starts against them.
     const guest = androidGuest();
-    if (guest && !guestChromiumReady(guest)) {
-      void ensureGuestChromium(guest, (line) => console.log(line)).then((ready) => { if (ready) chromeLauncher.start(); });
-      return;
-    }
+    if (!guest) { chromeLauncher.start(); return; }
+    console.log(`browser: preparing (chromium=${guestChromiumReady(guest)} engine=${browserEngineStatus().kind})`);
+    if (!guestChromiumReady(guest) && !await ensureGuestChromium(guest, (line) => console.log(line))) return;
+    if (browserEngineStatus().kind !== "ready") await installBrowserEngineOnce();
     chromeLauncher.start();
   });
   followupsReady = true;

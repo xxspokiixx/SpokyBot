@@ -89,7 +89,9 @@ export function chromeArgs(input: ChromeFlagsInput): string[] {
   const platform = input.platform ?? process.platform;
   const headless = input.mode === "headless";
   const args = [
-    "--remote-debugging-pipe",
+    // The phone's Chrome runs behind proot, which does not carry Chrome's extra descriptors, so the
+    // DevTools pipe never reaches it there. A loopback port is what the guest can open a socket to.
+    ...(platform === "android" ? ["--remote-debugging-port=0"] : ["--remote-debugging-pipe"]),
     `--user-data-dir=${input.userDataDir}`,
     ...(headless ? ["--headless=new"] : []),
     "--no-first-run",

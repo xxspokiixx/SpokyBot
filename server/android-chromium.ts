@@ -20,17 +20,25 @@ const PACKAGES = "chromium fonts-liberation";
  *
  *  `dpkg -i` cannot run here: it writes its backup by renaming over `var/lib/dpkg/status-old`, and
  *  Android's storage refuses that rename. `dpkg-deb -x` writes plain files, which it allows, and the
- *  files are what the browser needs — no package is being upgraded, so the database adds nothing. */
+ *  files are what the browser needs — no package is being upgraded, so the database adds nothing.
+ *
+ *  Chromium itself is not enough: it links eleven shared libraries (`libnss3`, `libgbm`, …) that arrive
+ *  as its dependencies. They are downloaded and unpacked first, and the browser is checked by loading it. */
 const UNPACK = `export DEBIAN_FRONTEND=noninteractive TMPDIR=/tmp; ` +
-  `apt-get update -qq && apt-get install -y --no-install-recommends --download-only ${PACKAGES} && ` +
+  `apt-get update -qq && ` +
+  `apt-get install -y --no-install-recommends --download-only ${PACKAGES} && ` +
   `cd /var/cache/apt/archives && ` +
-  `(for archive in chromium_*.deb chromium-common_*.deb fonts-liberation_*.deb; do dpkg-deb -x "$archive" /; done)`;
+  `(for archive in *.deb; do dpkg-deb -x "$archive" /; done) && ` +
+  `! ldd /usr/lib/chromium/chromium 2>&1 | grep -q "not found"`;
 
 let installing: Promise<boolean> | null = null;
 
-/** Whether this guest can start a browser right now. */
+/** Whether this guest can start a browser right now: the binary and the eleven libraries it links. */
 export function guestChromiumReady(guest: AndroidGuestConfig): boolean {
-  return existsSync(join(guest.rootfs, CHROMIUM_BINARY));
+  if (!existsSync(join(guest.rootfs, CHROMIUM_BINARY))) return false;
+  // libnss3 and libgbm are the two the archive never carries; without them Chrome exits at load.
+  return ["usr/lib/aarch64-linux-gnu/libnss3.so", "usr/lib/aarch64-linux-gnu/libgbm.so.1"]
+    .every((library) => existsSync(join(guest.rootfs, library)));
 }
 
 /** Installs Chromium once, in the background. Resolves true when it is present afterwards.

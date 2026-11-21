@@ -17,6 +17,9 @@ function guest(withChromium: boolean) {
   if (withChromium) {
     mkdirSync(join(rootfs, "usr", "lib", "chromium"), { recursive: true });
     writeFileSync(join(rootfs, CHROMIUM_BINARY), "binary");
+    // The two libraries the archive never carries: without them Chrome exits at load.
+    mkdirSync(join(rootfs, "usr", "lib", "aarch64-linux-gnu"), { recursive: true });
+    for (const library of ["libnss3.so", "libgbm.so.1"]) writeFileSync(join(rootfs, "usr", "lib", "aarch64-linux-gnu", library), "lib");
   }
   return { linuxDir, rootfs, tmpDir: join(linuxDir, "tmp") };
 }
@@ -31,6 +34,13 @@ describe("the phone's Chromium", () => {
   it("is missing from a rootfs built without it", () => {
     // The archive the app extracts has no browser, which is why the launcher failed every start.
     expect(guestChromiumReady(guest(false))).toBe(false);
+  });
+
+  it("is not ready with the binary alone, because its libraries arrive with the package", () => {
+    // Chrome exits at load when libnss3 or libgbm is absent, which reads as a closed DevTools pipe.
+    const config = guest(true);
+    rmSync(join(config.rootfs, "usr", "lib", "aarch64-linux-gnu", "libnss3.so"));
+    expect(guestChromiumReady(config)).toBe(false);
   });
 
   it("answers false instead of throwing when there is no proot to install through", async () => {

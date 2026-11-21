@@ -23,6 +23,12 @@ describe("Chrome's command line", () => {
     expect(() => chromeArgs({ userDataDir: "/p", mode: "headless", host: "desktop", userAgent: "x\ny" })).toThrow(/line break/);
   });
 
+  it("gives the phone a DevTools port, since proot cannot carry the pipe's extra descriptors", () => {
+    const phone = chromeArgs({ userDataDir: "/data/browser/profiles/abc", mode: "headless", host: "desktop", platform: "android", userAgent: UA });
+    expect(phone).toContain("--remote-debugging-port=0");
+    expect(phone.filter((arg) => arg.startsWith("--remote-debugging"))).toEqual(["--remote-debugging-port=0"]);
+  });
+
   it("gives headless the real display in device pixels, and a window nothing headless-only", () => {
     expect(headless).toContain("--screen-info={3024x1964 devicePixelRatio=2 colorDepth=30}");
     expect(headless).toContain("--headless=new");
