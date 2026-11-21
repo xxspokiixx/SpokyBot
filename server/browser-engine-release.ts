@@ -67,5 +67,10 @@ export function resolveAgentBrowserReleaseAsset(
   musl = false,
 ): AgentBrowserReleaseAsset | null {
   const key = platform === "linux" && musl ? `linux-musl-${arch}` : `${platform}-${arch}`;
-  return RELEASES.get(key) ?? null;
+  const exact = RELEASES.get(key);
+  if (exact) return exact;
+  // The phone has no agent-browser of its own, but its Linux guest is arm64 Linux: the musl build runs
+  // there through proot exactly as the desktop's does, and the launcher starts it that way.
+  if (platform === "android" && arch === "arm64") return RELEASES.get("linux-musl-arm64") ?? null;
+  return null;
 }

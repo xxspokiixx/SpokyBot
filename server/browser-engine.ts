@@ -6,6 +6,7 @@ import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
+import { guestInvocation } from "./android-guest.ts";
 import { DATA_DIR } from "./config.ts";
 import { browserBundlePaths } from "./browser-bundle-release.ts";
 import { browserProcessesRunning, browserProcessTree, releaseBrowserProfile, stopBrowserProcesses } from "./browser-processes.ts";
@@ -86,7 +87,11 @@ function runBrowserCommand(binaryPath: string, env: NodeJS.ProcessEnv, args: str
     let output = "";
     const finish = (ok: boolean) => { if (!settled) { settled = true; done({ ok, output }); } };
     let child: ReturnType<typeof spawn>;
-    try { child = spawnBotWork(() => spawn(binaryPath, args, { env, stdio: capture ? ["ignore", "pipe", "ignore"] : "ignore", windowsHide: true })); }
+    try {
+      // On the phone the engine is an arm64 Linux build, which only its guest can run.
+      const launch = guestInvocation(binaryPath, args, env);
+      child = spawnBotWork(() => spawn(launch.command, launch.args, { env: launch.env, stdio: capture ? ["ignore", "pipe", "ignore"] : "ignore", windowsHide: true }));
+    }
     catch { return finish(false); }
     let exited = false;
     let killTimer: NodeJS.Timeout | undefined;
