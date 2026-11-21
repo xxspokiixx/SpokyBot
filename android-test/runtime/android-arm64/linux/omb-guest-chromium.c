@@ -52,7 +52,8 @@ int main(int argc, char **argv) {
     // proot, the rootfs, an identity bind so Chrome's host-shaped paths
     // (user-data-dir, download dir, HOME) resolve inside the guest too, and
     // a writable /dev/shm, then the guest binary with the launcher's argv.
-    int total = 12 + argc + 1;
+    // One spare slot each for the port switch that replaces a dropped pipe and the two switches added below.
+    int total = 15 + argc + 1;
     char **nargv = calloc(total, sizeof(char *));
     if (!nargv) fail("omb-guest-chromium: out of memory\n");
     int i = 0;
@@ -69,7 +70,25 @@ int main(int argc, char **argv) {
         nargv[i++] = identity;
     }
     nargv[i++] = (char *)"/usr/lib/chromium/chromium";
-    for (int a = 1; a < argc && i < total - 1; a++) nargv[i++] = argv[a];
+    int dropped_pipe = 0, has_no_sandbox = 0, has_shm_off = 0;
+    for (int a = 1; a < argc && i < total - 1; a++) {
+        // proot cannot carry fd 3 and 4, so Chrome aborts on --remote-debugging-pipe with
+        // "Remote debugging pipe file descriptors are not open" — and the switch wins over the port even
+        // when both are passed. agent-browser always adds it, so it is dropped and a loopback port named.
+        if (strcmp(argv[a], "--remote-debugging-pipe") == 0) {
+            dropped_pipe = 1;
+            continue;
+        }
+        if (strcmp(argv[a], "--no-sandbox") == 0) has_no_sandbox = 1;
+        if (strcmp(argv[a], "--disable-dev-shm-usage") == 0) has_shm_off = 1;
+        nargv[i++] = argv[a];
+    }
+    if (dropped_pipe) nargv[i++] = (char *)"--remote-debugging-port=0";
+    // Chrome's sandbox needs user namespaces, which proot does not provide: it dies in the zygote before
+    // the DevTools port is written. agent-browser does not pass this itself on the paths it takes here.
+    if (!has_no_sandbox) nargv[i++] = (char *)"--no-sandbox";
+    // proot binds the host's /dev, which has no shm: Chrome aborts unless it uses a temp file instead.
+    if (!has_shm_off) nargv[i++] = (char *)"--disable-dev-shm-usage";
     nargv[i] = NULL;
 
     execv(proot, nargv);
