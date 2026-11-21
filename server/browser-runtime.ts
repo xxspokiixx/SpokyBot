@@ -68,9 +68,13 @@ const MAX_RESPONSE_BYTES = 16_777_216;
 const HANDSHAKE_TIMEOUT_MS = 1_000;
 const HOST_ENV = ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PATH", "Path", "TMPDIR", "TMP", "TEMP", "SystemRoot", "WINDIR", "SYSTEMDRIVE", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR"];
 
+/** On the phone the browser is entered through `omb-guest-chromium`, which finds proot and the rootfs only through these.
+ *  Without them it prints "exec of proot failed", so the live screen opened onto nothing while tool calls kept working. */
+const GUEST_ENV = ["OMB_ANDROID_STANDALONE", "OMB_ANDROID_LINUX_DIR", "OMB_ANDROID_ROOTFS", "OMB_ANDROID_DATA_DIR", "OMB_ANDROID_TMP_DIR"];
+
 /** One env for MCP, viewer and cleanup so they share HOME/socket paths: OS plumbing, never provider credentials. */
 export function browserRuntimeEnv(overrides: Record<string, string | undefined>): NodeJS.ProcessEnv {
-  const env = Object.fromEntries(HOST_ENV.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
+  const env = Object.fromEntries([...HOST_ENV, ...GUEST_ENV].flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
   const merged = { ...env, ...overrides };
   // The phone's own HOME is too long for the engine's 103-byte socket path, so every caller that names only a session
   // still needs the short folder; without this, cleanup and viewer paths read a socket the engine never used.

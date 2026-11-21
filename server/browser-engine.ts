@@ -6,7 +6,7 @@ import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
-import { androidGuest, guestInvocation } from "./android-guest.ts";
+import { androidGuest, guestInvocation, guestWorkspacePath } from "./android-guest.ts";
 import { CHROMIUM_BINARY, guestChromiumReady, guestSocketDir } from "./android-chromium.ts";
 import { DATA_DIR } from "./config.ts";
 import { browserBundlePaths } from "./browser-bundle-release.ts";
@@ -78,10 +78,11 @@ function daemonControlEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv | null {
   try { configPath = ensureManagedBrowserConfig(env); }
   catch { return null; }
   const controlEnv = Object.fromEntries(Object.entries(env).filter(([key]) => !key.startsWith("AGENT_BROWSER_") || ["AGENT_BROWSER_SESSION", "AGENT_BROWSER_SOCKET_DIR", "AGENT_BROWSER_NAMESPACE", "AGENT_BROWSER_ENCRYPTION_KEY", "AGENT_BROWSER_RESTORE", "AGENT_BROWSER_RESTORE_SAVE"].includes(key)));
-  controlEnv.AGENT_BROWSER_CONFIG = configPath;
+  // Written here, read inside the guest on the phone: the file is one, its two names are not. A host path there reads as
+  // "config file not found", and every control command, the close that precedes a saved-login check included, then fails.
+  controlEnv.AGENT_BROWSER_CONFIG = guestWorkspacePath(configPath, env);
   return controlEnv;
 }
-
 function runBrowserCommand(binaryPath: string, env: NodeJS.ProcessEnv, args: string[], deadline: number, capture = false): Promise<{ ok: boolean; output: string }> {
   return new Promise((done) => {
     let settled = false;
@@ -91,10 +92,9 @@ function runBrowserCommand(binaryPath: string, env: NodeJS.ProcessEnv, args: str
     try {
       // On the phone the engine is an arm64 Linux build, which only its guest can run.
       const launch = guestInvocation(binaryPath, args, env);
-      child = spawnBotWork(() => spawn(launch.command, launch.args, { env: launch.env, stdio: capture ? ["ignore", "pipe", "ignore"] : "ignore", windowsHide: true }));
+      child = spawnBotWork(() => spawn(launch.command, launch.args, { env: launch.env, stdio: capture ? ["ignore", "pipe", "pipe"] : "ignore", windowsHide: true }));
     }
-    catch { return finish(false); }
-    let exited = false;
+    catch { return finish(false); }    let exited = false;
     let killTimer: NodeJS.Timeout | undefined;
     const timer = setTimeout(() => {
       child.kill("SIGTERM");
@@ -107,6 +107,7 @@ function runBrowserCommand(binaryPath: string, env: NodeJS.ProcessEnv, args: str
       output += String(chunk);
       if (output.length > 262_144) { clearTimeout(timer); child.kill(); finish(false); }
     });
+    child.stderr?.on("data", () => {});
     child.on("error", () => { exited = true; clearTimeout(timer); clearTimeout(killTimer); finish(false); });
     // exit can precede the last piped stdout chunk; close follows stdio.
     child.on("close", (code) => { exited = true; clearTimeout(timer); clearTimeout(killTimer); finish(code === 0); });
@@ -149,8 +150,7 @@ async function closeOnce(binaryPath: string, env: NodeJS.ProcessEnv, session: st
   const deadline = Date.now() + timeoutMs;
   // `close` to a stopped session starts a daemon only to stop it again and leaves its .config file behind.
   const running = await runningBrowserSessions(binaryPath, closeEnv, deadline);
-  if (!running) return false;
-  if (!running.includes(session)) return true;
+  if (!running) return false;  if (!running.includes(session)) return true;
   const pidFile = browserDaemonFile(env, ".pid");
   const daemonPid = () => { try { return readFileSync(pidFile, "utf8").trim(); } catch { return null; } };
   const closing = daemonPid();

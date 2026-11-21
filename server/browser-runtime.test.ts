@@ -391,6 +391,17 @@ describe("server-owned browser MCP runtime", () => {
     } finally { vi.unstubAllEnvs(); }
   });
 
+  it("carries the guest settings the phone's browser wrapper needs to find proot", () => {
+    // Without these, omb-guest-chromium prints "exec of proot failed" and the live screen opens onto nothing, while
+    // tool calls keep working because they build their own environment.
+    const keys = ["OMB_ANDROID_STANDALONE", "OMB_ANDROID_LINUX_DIR", "OMB_ANDROID_ROOTFS", "OMB_ANDROID_DATA_DIR"] as const;
+    for (const key of keys) vi.stubEnv(key, `/fixture/${key}`);
+    try {
+      const env = browserRuntimeEnv({ AGENT_BROWSER_SESSION: "fixture" });
+      for (const key of keys) expect(env[key]).toBe(`/fixture/${key}`);
+    } finally { vi.unstubAllEnvs(); }
+  });
+
   it("rechecks a revoked capability after initialization and before forwarding", async () => {
     const value = runtime();
     let valid = true;

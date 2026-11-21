@@ -4,6 +4,7 @@ import type { ServerResponse } from "node:http";
 import { promisify } from "node:util";
 import type { PageSize } from "./browser-page-size.ts";
 import { attachesToChrome, browserRuntimeEnv, type BrowserRuntime } from "./browser-runtime.ts";
+import { guestInvocation } from "./android-guest.ts";
 import { requestedSize } from "./browser/viewers/viewport.ts";
 import { closeBrowserSession } from "./browser-engine.ts";
 import { DialogWatch, localDevToolsUrl } from "./browser-dialogs.ts";
@@ -563,9 +564,12 @@ export class BrowserLive {
   private async command(viewer: Viewer, args: string[], timeout = COMMAND_TIMEOUT_MS, person = false): Promise<ObjectValue> {
     if (!this.current(viewer)) throw new BrowserLiveError("This browser view is no longer available.", 409);
     const env = browserRuntimeEnv({ ...viewer.spec.env, AGENT_BROWSER_SESSION: viewer.session });
+    // On the phone the engine is an arm64 Linux build, so it runs through the guest: running the binary directly there
+    // fails with nothing on stderr, which read as an engine that is not installed.
+    const launch = guestInvocation(viewer.spec.command, [...args, "--json", "--no-webmcp"], env);
     try {
-      const { stdout } = await execute(viewer.spec.command, [...args, "--json", "--no-webmcp"], {
-        env, timeout, killSignal: "SIGKILL", maxBuffer: 1024 * 1024, encoding: "utf8", windowsHide: true,
+      const { stdout } = await execute(launch.command, launch.args, {
+        env: launch.env, timeout, killSignal: "SIGKILL", maxBuffer: 1024 * 1024, encoding: "utf8", windowsHide: true,
         signal: viewer.abort.signal,
       });
       if (!this.current(viewer)) throw new Error("stale viewer");

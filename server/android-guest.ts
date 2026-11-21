@@ -78,6 +78,10 @@ export function guestCommandFor(guest: AndroidGuestConfig, cli: string, args: st
   const binary = isAbsolutePath(cli) ? cli : join(guest.linuxDir, cli);
   const binds = ["-b", `${guest.linuxDir}:/host-linux`, "-b", `${guest.tmpDir}:/tmp`];
   if (guest.dataDir) binds.push("-b", `${guest.dataDir}:/data`);
+  // The app's own home, at the same name on both sides: the browser engine keeps its managed config under it, and the
+  // guest's copy of the engine must read the very file this process wrote.
+  const home = browserHome(guest, env);
+  if (home) binds.push("-b", `${home}:${home}`);
   // The app folder itself, beside data: the server bundle and its proxies live in files/omb-installed,
   // and a guest engine starts them (the agents MCP). Without this mount their paths mean nothing there.
   const appDir = appFilesDir(guest);
@@ -177,4 +181,13 @@ export function appFilesDir(guest: AndroidGuestConfig): string | null {
   const normalized = guest.dataDir.replaceAll("\\", "/");
   const cut = normalized.lastIndexOf("/");
   return cut > 0 ? normalized.slice(0, cut) : null;
+}
+
+/** The phone process's own HOME when it sits under the app's `files` folder: what the browser engine builds its config
+ *  path from. Null when HOME is elsewhere, so a desktop value is never bound into the guest. */
+function browserHome(guest: AndroidGuestConfig, env: NodeJS.ProcessEnv): string | null {
+  const home = (env.HOME ?? env.USERPROFILE ?? "").replaceAll("\\", "/");
+  const appDir = appFilesDir(guest);
+  if (!home || !appDir) return null;
+  return home === appDir || home.startsWith(`${appDir}/`) || home === guest.dataDir || home.startsWith(`${guest.dataDir}/`) ? home : null;
 }
