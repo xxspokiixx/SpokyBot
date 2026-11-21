@@ -39,6 +39,14 @@ shared/app-frame/app-host.html text eol=lf
 
 # Imported by a vitest test: a CRLF checkout of its first lines broke the import on Windows.
 scripts/tighten-ratchets.mjs text eol=lf
+
+# Shell scripts the phone runs inside its guest. A CRLF checkout makes bash read
+# "set -e\r" and answer "illegal option -", which is how the graphical desktop failed to set up on
+# the tablet with a script that is correct in the repository.
+android-test/linux/*.sh text eol=lf
+android-test/runtime/android-arm64/linux/*.sh text eol=lf
+android-test/app/src/main/assets/omb/linux/*.sh text eol=lf
+android-test/app/src/main/assets/omb/server/**/*.sh text eol=lf
 android-test/runtime/android-arm64/linux/rootfs.tar.gz filter=lfs diff=lfs merge=lfs -text
 android-test/app/src/main/assets/omb/linux/rootfs.blob filter=lfs diff=lfs merge=lfs -text
 android-test/app/src/main/jniLibs/arm64-v8a/libnodeexec.so filter=lfs diff=lfs merge=lfs -text

@@ -6,7 +6,7 @@ import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
-import { androidGuest, guestInvocation, guestWorkspacePath } from "./android-guest.ts";
+import { androidGuest } from "./android-guest.ts";
 import { CHROMIUM_BINARY, guestChromiumReady, guestSocketDir } from "./android-chromium.ts";
 import { DATA_DIR } from "./config.ts";
 import { browserBundlePaths } from "./browser-bundle-release.ts";
@@ -78,9 +78,8 @@ function daemonControlEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv | null {
   try { configPath = ensureManagedBrowserConfig(env); }
   catch { return null; }
   const controlEnv = Object.fromEntries(Object.entries(env).filter(([key]) => !key.startsWith("AGENT_BROWSER_") || ["AGENT_BROWSER_SESSION", "AGENT_BROWSER_SOCKET_DIR", "AGENT_BROWSER_NAMESPACE", "AGENT_BROWSER_ENCRYPTION_KEY", "AGENT_BROWSER_RESTORE", "AGENT_BROWSER_RESTORE_SAVE"].includes(key)));
-  // Written here, read inside the guest on the phone: the file is one, its two names are not. A host path there reads as
-  // "config file not found", and every control command, the close that precedes a saved-login check included, then fails.
-  controlEnv.AGENT_BROWSER_CONFIG = guestWorkspacePath(configPath, env);
+  // The engine runs as this process's own command, so it reads the very path this process wrote.
+  controlEnv.AGENT_BROWSER_CONFIG = configPath;
   return controlEnv;
 }
 function runBrowserCommand(binaryPath: string, env: NodeJS.ProcessEnv, args: string[], deadline: number, capture = false): Promise<{ ok: boolean; output: string }> {
@@ -90,9 +89,9 @@ function runBrowserCommand(binaryPath: string, env: NodeJS.ProcessEnv, args: str
     const finish = (ok: boolean) => { if (!settled) { settled = true; done({ ok, output }); } };
     let child: ReturnType<typeof spawn>;
     try {
-      // On the phone the engine is an arm64 Linux build, which only its guest can run.
-      const launch = guestInvocation(binaryPath, args, env);
-      child = spawnBotWork(() => spawn(launch.command, launch.args, { env: launch.env, stdio: capture ? ["ignore", "pipe", "pipe"] : "ignore", windowsHide: true }));
+      // The engine is a static build and runs natively here; only what it starts (Chrome) needs the guest, and it
+      // enters that through the wrapper named by AGENT_BROWSER_EXECUTABLE_PATH.
+      child = spawnBotWork(() => spawn(binaryPath, args, { env, stdio: capture ? ["ignore", "pipe", "pipe"] : "ignore", windowsHide: true }));
     }
     catch { return finish(false); }    let exited = false;
     let killTimer: NodeJS.Timeout | undefined;
@@ -635,6 +634,12 @@ export function agentBrowserIntegration(input: {
     // engine's own process, so the socket goes to a short folder beside the app's data.
     env.AGENT_BROWSER_SOCKET_DIR = guestSocketDir(guest);
     try { mkdirSync(env.AGENT_BROWSER_SOCKET_DIR, { recursive: true }); } catch {}
+    // The engine resolves every state path against HOME, and the live screen's spec carries none, so it is given the
+    // app's data folder. This process writes there; guestCommandFor names the same folder the way the guest does.
+    if (guest.dataDir) {
+      env.HOME = guest.dataDir;
+      env.TMPDIR = guest.tmpDir;
+    }
   }
   // The gate goes last, so nothing the launcher sets can route Chrome around it; launcher arguments are kept beside its own.
   if (!input.attach) {
@@ -643,14 +648,9 @@ export function agentBrowserIntegration(input: {
     if (env.AGENT_BROWSER_PROFILE) launch.AGENT_BROWSER_ARGS = [launch.AGENT_BROWSER_ARGS, PROFILE_CACHE_ARG].filter(Boolean).join("\n");
     Object.assign(env, input.launcher, agentBrowserEgressEnv(launch, input.egressPort ?? 0, input.platform ?? process.platform));
   }
-  // On the phone the engine is an arm64 Linux build that only the guest can run, so the command the
-  // MCP client starts is proot rather than the binary itself; its own arguments stay the same.
-  if (guest) {
-    const defined = Object.fromEntries(Object.entries(env).filter(([, value]) => typeof value === "string")) as Record<string, string>;
-    const launch = guestInvocation(input.binaryPath, ["mcp", "--tools", "core", "--no-webmcp"], defined);
-    const launched = Object.fromEntries(Object.entries(launch.env).filter(([, value]) => typeof value === "string")) as Record<string, string>;
-    return { command: launch.command, args: launch.args, env: launched };
-  }
+  // The engine is a static musl build, so on the phone it runs natively and starts Chrome through the guest wrapper it
+  // names. Wrapping it in proot put one proot inside another and the engine then never answered; it answers here in
+  // about twenty seconds. Its paths stay this process's own, which is where it writes the state it later reads.
   return { command: input.binaryPath, args: ["mcp", "--tools", "core", "--no-webmcp"], env };
 }
 

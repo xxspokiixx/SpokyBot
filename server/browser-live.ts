@@ -4,7 +4,7 @@ import type { ServerResponse } from "node:http";
 import { promisify } from "node:util";
 import type { PageSize } from "./browser-page-size.ts";
 import { attachesToChrome, browserRuntimeEnv, type BrowserRuntime } from "./browser-runtime.ts";
-import { guestInvocation } from "./android-guest.ts";
+import { androidGuest } from "./android-guest.ts";
 import { requestedSize } from "./browser/viewers/viewport.ts";
 import { closeBrowserSession } from "./browser-engine.ts";
 import { DialogWatch, localDevToolsUrl } from "./browser-dialogs.ts";
@@ -21,6 +21,9 @@ const MAX_BUFFER = 8 * 1024 * 1024;
 const HEARTBEAT_MS = 10_000;
 const COMMAND_TIMEOUT_MS = 30_000;
 const STATUS_PROBE_MS = 10_000;
+/** The phone's engine answers a status read in about twenty seconds, since it starts a browser engine on first use;
+ *  the desktop budget is a tenth of that. */
+const statusProbeMs = (): number => (androidGuest() ? 75_000 : STATUS_PROBE_MS);
 const BUSY_RETRY_MS = [1_000, 2_000, 5_000];
 const BUSY_LIMIT_MS = 10 * 60_000;
 // agent-browser's native press resolver supplies the virtual key codes and Enter/Tab text its raw input_keyboard relay omits.
@@ -564,12 +567,10 @@ export class BrowserLive {
   private async command(viewer: Viewer, args: string[], timeout = COMMAND_TIMEOUT_MS, person = false): Promise<ObjectValue> {
     if (!this.current(viewer)) throw new BrowserLiveError("This browser view is no longer available.", 409);
     const env = browserRuntimeEnv({ ...viewer.spec.env, AGENT_BROWSER_SESSION: viewer.session });
-    // On the phone the engine is an arm64 Linux build, so it runs through the guest: running the binary directly there
-    // fails with nothing on stderr, which read as an engine that is not installed.
-    const launch = guestInvocation(viewer.spec.command, [...args, "--json", "--no-webmcp"], env);
+    // The spec names the engine itself, which runs natively on the phone; its own wrapper takes Chrome into the guest.
     try {
-      const { stdout } = await execute(launch.command, launch.args, {
-        env: launch.env, timeout, killSignal: "SIGKILL", maxBuffer: 1024 * 1024, encoding: "utf8", windowsHide: true,
+      const { stdout } = await execute(viewer.spec.command, [...args, "--json", "--no-webmcp"], {
+        env, timeout, killSignal: "SIGKILL", maxBuffer: 1024 * 1024, encoding: "utf8", windowsHide: true,
         signal: viewer.abort.signal,
       });
       if (!this.current(viewer)) throw new Error("stale viewer");
@@ -616,7 +617,7 @@ export class BrowserLive {
       throw new BrowserLiveError(error instanceof Error ? error.message : "The browser is not ready yet.", 503);
     });
     let status: ObjectValue;
-    try { status = await this.command(viewer, ["stream", "status"], STATUS_PROBE_MS); }
+    try { status = await this.command(viewer, ["stream", "status"], statusProbeMs()); }
     catch (error) {
       // Only a bot call or a person's action can hold the engine past this read; with neither, it has hung.
       if (!(error instanceof BrowserBusyError) || this.runtime.working(viewer.session)) throw error;

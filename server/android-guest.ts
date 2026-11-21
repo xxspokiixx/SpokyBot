@@ -8,7 +8,7 @@
 // The phone already ships proot and a rootfs with that loader, and every guest command runs through
 // them. This wraps an engine the same way, so a glibc CLI starts on a phone exactly as it does in
 // the guest.
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { basename, join, sep } from "node:path";
 
 /** The guest paths a wrapped engine needs to find its own files and its config. */
@@ -66,6 +66,9 @@ export function guestInvocation(executable: string, args: string[], env: NodeJS.
   const guest = androidGuest(env);
   if (!guest || !isAbsolutePath(executable)) return { command: executable, args, env };
   if (ANDROID_NATIVE.has(basename(executable))) return { command: executable, args, env };
+  // A command that is already the guest's proot is already inside: wrapping it again nests one proot in another, and
+  // that hangs until the caller's deadline instead of failing, which is what froze the browser's live screen.
+  if (executable === join(guest.linuxDir, "proot")) return { command: executable, args, env };
   // Only an installed or staged engine is a guest build; the app's own Node is not.
   if (!existsSync(executable)) return { command: executable, args, env };
   return guestCommandFor(guest, executable, args, env);
@@ -80,8 +83,17 @@ export function guestCommandFor(guest: AndroidGuestConfig, cli: string, args: st
   if (guest.dataDir) binds.push("-b", `${guest.dataDir}:/data`);
   // The app's own home, at the same name on both sides: the browser engine keeps its managed config under it, and the
   // guest's copy of the engine must read the very file this process wrote.
+  const appDirForHome = appFilesDir(guest);
+  if (appDirForHome) binds.push("-b", `${appDirForHome}:${appDirForHome}`);
   const home = browserHome(guest, env);
-  if (home) binds.push("-b", `${home}:${home}`);
+  if (home && home !== appDirForHome) binds.push("-b", `${home}:${home}`);
+  // The engine's control socket, also identity-bound: a unix socket path is passed straight to connect(), so a guest
+  // that names it differently from this process never reaches the daemon and the call hangs instead of failing.
+  const socketDir = (env.AGENT_BROWSER_SOCKET_DIR ?? "").replaceAll("\\", "/");
+  if (socketDir && socketDir.startsWith("/") && !binds.includes(`${socketDir}:${socketDir}`)) {
+    try { mkdirSync(socketDir, { recursive: true }); } catch {}
+    binds.push("-b", `${socketDir}:${socketDir}`);
+  }
   // The app folder itself, beside data: the server bundle and its proxies live in files/omb-installed,
   // and a guest engine starts them (the agents MCP). Without this mount their paths mean nothing there.
   const appDir = appFilesDir(guest);
@@ -103,7 +115,9 @@ export function guestCommandFor(guest: AndroidGuestConfig, cli: string, args: st
     env: {
       ...env,
       PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/host-linux",
-      HOME: "/root",
+      // A caller that names its own HOME keeps it, since the state the engine keeps there must be found again; the
+      // rootfs root is only the default.
+      HOME: guestHome(guest, env),
       TMPDIR: "/tmp",
       LD_LIBRARY_PATH: guest.linuxDir,
       PROOT_TMP_DIR: guest.tmpDir,
@@ -181,6 +195,15 @@ export function appFilesDir(guest: AndroidGuestConfig): string | null {
   const normalized = guest.dataDir.replaceAll("\\", "/");
   const cut = normalized.lastIndexOf("/");
   return cut > 0 ? normalized.slice(0, cut) : null;
+}
+
+/** The HOME a guest command runs with: the caller's own, named the way the guest sees it, or the rootfs root. */
+function guestHome(guest: AndroidGuestConfig, env: NodeJS.ProcessEnv): string {
+  const wanted = (env.HOME ?? env.USERPROFILE ?? "").replaceAll("\\", "/");
+  if (!wanted) return "/root";
+  const translated = guestWorkspacePath(wanted, env);
+  // A host path the mounts do not cover cannot be made writable here, so the engine gets the rootfs root instead.
+  return translated.startsWith("/") && !translated.startsWith(guest.linuxDir) ? translated : "/root";
 }
 
 /** The phone process's own HOME when it sits under the app's `files` folder: what the browser engine builds its config
