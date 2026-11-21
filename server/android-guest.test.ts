@@ -124,10 +124,9 @@ describe("the folder an engine names, read as this computer has it", () => {
   it("leaves the phone's own app folder alone instead of nesting it inside itself", () => {
     // /data is both the guest's data mount and the start of the phone's real path, so reading its
     // leading /data as the mount rewrote .../files/home into .../files/data/user/0/.../files/home.
-    const { env, dir } = phone();
+    const { dir } = phone();
     try {
-      const app = join(dir, "data").replaceAll("\\", "/");
-      // The test's temp dir is not Android's /data/user/0, so drive the real shape directly.
+      // The temp dir is not Android's /data/user/0, so the real shape is driven directly.
       const android = {
         OMB_ANDROID_STANDALONE: "1",
         OMB_ANDROID_LINUX_DIR: "/data/user/0/com.openmausbot.test/files/linux",
@@ -138,7 +137,6 @@ describe("the folder an engine names, read as this computer has it", () => {
         .toBe("/data/user/0/com.openmausbot.test/files/home");
       expect(hostWorkspacePath("/data/task-workspaces/a/b", android).replaceAll("\\", "/"))
         .toBe("/data/user/0/com.openmausbot.test/files/data/task-workspaces/a/b");
-      expect(app).toContain("data");
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
