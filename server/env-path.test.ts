@@ -736,4 +736,31 @@ describe("a standalone engine on the phone", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("does not put the app's own Node in the guest, which cannot run an Android binary", () => {
+    // Wrapping it made the local computer's MCP answer ENOENT, and every "this computer" turn died.
+    const dir = mkdtempSync(join(tmpdir(), "omb-guest-appnode-"));
+    const linux = join(dir, "linux");
+    const data = join(dir, "data");
+    const runtime = join(dir, "node-runtime");
+    mkdirSync(join(linux, "rootfs", "etc"), { recursive: true });
+    mkdirSync(runtime, { recursive: true });
+    writeFileSync(join(linux, "proot"), "proot");
+    const node = join(runtime, "libnodeexec.so");
+    writeFileSync(node, "android-binary");
+    const env = {
+      OMB_ANDROID_STANDALONE: "1",
+      OMB_ANDROID_LINUX_DIR: linux,
+      OMB_ANDROID_ROOTFS: join(linux, "rootfs"),
+      OMB_ANDROID_DATA_DIR: data,
+    } as NodeJS.ProcessEnv;
+    try {
+      const resolved = resolveCliSpawn(node, ["script.mjs", "mcp"], env);
+      // Not wrapped in proot: the command stays the app's own runtime, whatever the temp path's spelling.
+      expect(resolved.command.endsWith("libnodeexec.so")).toBe(true);
+      expect(resolved.args).toEqual(["script.mjs", "mcp"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

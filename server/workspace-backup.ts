@@ -313,6 +313,7 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
   let skippedLinks = 0;
   let skippedDependencies = 0;
   let skippedWorkLinks = 0;
+  const skippedUnreadable: string[] = [];
   let copiedLinks = 0;
   try {
     const root = realpathSync(dataDir);
@@ -330,7 +331,19 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
       try { snapshotDb.exec("PRAGMA journal_mode = DELETE"); } finally { snapshotDb.close(); }
     }
     const walk = (directory: string, prefix = "", chain: string[] = [root]) => {
-      for (const name of readdirSync(directory).sort()) {
+      let names: string[];
+      try {
+        names = readdirSync(directory).sort();
+      } catch (error) {
+        // One unreadable folder must not take the whole export with it: the person keeps everything
+        // else, and the summary says what was left out. A phone's own storage refuses some folders
+        // to a shell, and an interrupted copy can leave one with no permissions at all.
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "EACCES" && code !== "EPERM") throw error;
+        skippedUnreadable.push(prefix || ".");
+        return;
+      }
+      for (const name of names) {
         if (!prefix && excluded(name)) continue;
         const path = prefix ? `${prefix}/${name}` : name;
         if (excludedWorkspaceAuthPath(path) || ephemeralWorkspaceTokenPath(path) || redownloadedOrgLibraryPath(path) || liveDataEnginePath(path) || regeneratedVpsSshPath(path)) continue;
@@ -405,6 +418,9 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
     if (skippedDependencies) warnings.push(`${skippedDependencies} installed dependency folder(s) (node_modules) were omitted; reinstall them in the project after restoring.`);
     if (copiedLinks) warnings.push(`${copiedLinks} symbolic link(s) inside a workspace were saved as copies of what they point to; restoring creates regular files and folders there.`);
     if (skippedWorkLinks) warnings.push(`${skippedWorkLinks} symbolic link(s) in conversation work folders were omitted; what they point to is outside this backup.`);
+    if (skippedUnreadable.length) {
+      warnings.push(`${skippedUnreadable.length} folder(s) could not be read and were left out: ${skippedUnreadable.slice(0, 5).join(", ")}${skippedUnreadable.length > 5 ? " and others" : ""}.`);
+    }
     const summary: WorkspaceBackupSummary = {
       format: "openmaus.workspace-backup", version: 1, id: job.id, createdAt: new Date().toISOString(),
       appVersion: options.appVersion ?? "unknown", files: entries.filter((entry) => entry.type === "file").length,

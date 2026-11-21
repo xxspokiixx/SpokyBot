@@ -72,6 +72,10 @@ export function guestCommandFor(guest: AndroidGuestConfig, cli: string, args: st
   const binary = isAbsolutePath(cli) ? cli : join(guest.linuxDir, cli);
   const binds = ["-b", `${guest.linuxDir}:/host-linux`, "-b", `${guest.tmpDir}:/tmp`];
   if (guest.dataDir) binds.push("-b", `${guest.dataDir}:/data`);
+  // The app folder itself, beside data: the server bundle and its proxies live in files/omb-installed,
+  // and a guest engine starts them (the agents MCP). Without this mount their paths mean nothing there.
+  const appDir = appFilesDir(guest);
+  if (appDir) binds.push("-b", `${appDir}:/app`);
   // A binary outside the linux dir rides its own mount, so the guest can name it at all.
   const inLinux = binary.startsWith(guest.linuxDir);
   let inside = inLinux ? `/host-linux/${binary.slice(guest.linuxDir.length + 1).split(sep).join("/")}` : "/host-tool";
@@ -113,9 +117,12 @@ export function guestWorkspacePath(path: string, env: NodeJS.ProcessEnv = proces
   const guest = androidGuest(env);
   if (!guest) return path;
   for (const [host, inside] of guestMounts(guest)) {
-    const prefix = host.endsWith(sep) ? host : host + sep;
-    if (path === host) return inside;
-    if (path.startsWith(prefix)) return `${inside}/${path.slice(prefix.length).split(sep).join("/")}`;
+    // The phone's paths are POSIX whatever the host running this code uses.
+    const normalized = host.replaceAll("\\", "/");
+    const prefix = normalized.endsWith("/") ? normalized : `${normalized}/`;
+    const candidate = path.replaceAll("\\", "/");
+    if (candidate === normalized) return inside;
+    if (candidate.startsWith(prefix)) return `${inside}/${candidate.slice(prefix.length)}`;
   }
   return path;
 }
@@ -123,19 +130,45 @@ export function guestWorkspacePath(path: string, env: NodeJS.ProcessEnv = proces
 /** The inverse of guestWorkspacePath: a path a guest engine names, as this computer has it.
  *
  *  The engine asks the client to read and write files by the only names it knows, which are the
- *  guest's; the server opens them on the host. Off the phone this returns the input unchanged. */
+ *  guest's; the server opens them on the host. A path that is already a host path is returned
+ *  unchanged: `/data/user/0/<pkg>/files/home` is the phone's own folder, and reading its leading
+ *  `/data` as the guest mount rewrote it into `/data/user/0/<pkg>/files/data/user/0/<pkg>/files/home`,
+ *  which made every export fail on a folder that cannot be read. Off the phone this is a no-op. */
 export function hostWorkspacePath(path: string, env: NodeJS.ProcessEnv = process.env): string {
   const guest = androidGuest(env);
   if (!guest) return path;
+  // The phone's own prefix wins: the data mount is only a guest name when the rest does not
+  // continue into the real app folder.
+  const appRoot = appStorageRoot(guest);
+  if (appRoot && (path === appRoot || path.startsWith(`${appRoot}/`))) return path;
   for (const [host, inside] of guestMounts(guest)) {
     if (path === inside) return host;
-    if (path.startsWith(`${inside}/`)) return join(host, ...path.slice(inside.length + 1).split("/"));
+    if (path.startsWith(`${inside}/`)) return `${host.replace(/\/+$/u, "")}/${path.slice(inside.length + 1)}`;
   }
   return path;
+}
+
+/** `/data/user/0/<pkg>/files`, the path Android itself uses, derived from the guest's data folder. */
+function appStorageRoot(guest: AndroidGuestConfig): string | null {
+  if (!guest.dataDir) return null;
+  const marker = "/files/";
+  const at = guest.dataDir.indexOf(marker);
+  return at < 0 ? null : guest.dataDir.slice(0, at + marker.length - 1);
 }
 
 function guestMounts(guest: AndroidGuestConfig): Array<[string, string]> {
   const mounts: Array<[string, string]> = [[guest.linuxDir, "/host-linux"]];
   if (guest.dataDir) mounts.push([guest.dataDir, "/data"]);
-  return mounts;
+  const appDir = appFilesDir(guest);
+  if (appDir) mounts.push([appDir, "/app"]);
+  // Longest host path first: `files` contains `files/data`, so the data mount must win for its own files.
+  return mounts.sort((a, b) => b[0].length - a[0].length);
+}
+
+/** The app's `files` folder: the parent of `data`, holding the installed server bundle. */
+export function appFilesDir(guest: AndroidGuestConfig): string | null {
+  if (!guest.dataDir) return null;
+  const normalized = guest.dataDir.replaceAll("\\", "/");
+  const cut = normalized.lastIndexOf("/");
+  return cut > 0 ? normalized.slice(0, cut) : null;
 }

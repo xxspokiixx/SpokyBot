@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { androidGuest, guestCommandFor, guestWorkspacePath, needsGuestLoader } from "./android-guest.ts";
+import { androidGuest, guestCommandFor, guestWorkspacePath, hostWorkspacePath, needsGuestLoader } from "./android-guest.ts";
 
 function phone() {
   const dir = mkdtempSync(join(tmpdir(), "omb-guest-"));
@@ -95,8 +95,7 @@ describe("a glibc engine on the phone", () => {
   });
 });
 
-describe("the folder a guest engine is told to work in", () => {
-  it("names it by the mount the guest sees, not by the phone's own path", () => {
+describe("the folder a guest engine is told to work in", () => {  it("names it by the mount the guest sees, not by the phone's own path", () => {
     // OpenCode was handed /data/user/0/<pkg>/files/data/task-workspaces/x, answered NotFound, and
     // every turn failed before its first model call.
     const { env, dir } = phone();
@@ -118,5 +117,46 @@ describe("the folder a guest engine is told to work in", () => {
     try {
       expect(guestWorkspacePath("/sdcard/Download", env)).toBe("/sdcard/Download");
     } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe("the folder an engine names, read as this computer has it", () => {
+  it("leaves the phone's own app folder alone instead of nesting it inside itself", () => {
+    // /data is both the guest's data mount and the start of the phone's real path, so reading its
+    // leading /data as the mount rewrote .../files/home into .../files/data/user/0/.../files/home.
+    const { env, dir } = phone();
+    try {
+      const app = join(dir, "data").replaceAll("\\", "/");
+      // The test's temp dir is not Android's /data/user/0, so drive the real shape directly.
+      const android = {
+        OMB_ANDROID_STANDALONE: "1",
+        OMB_ANDROID_LINUX_DIR: "/data/user/0/com.openmausbot.test/files/linux",
+        OMB_ANDROID_ROOTFS: "/data/user/0/com.openmausbot.test/files/linux/rootfs",
+        OMB_ANDROID_DATA_DIR: "/data/user/0/com.openmausbot.test/files/data",
+      } as NodeJS.ProcessEnv;
+      expect(hostWorkspacePath("/data/user/0/com.openmausbot.test/files/home", android))
+        .toBe("/data/user/0/com.openmausbot.test/files/home");
+      expect(hostWorkspacePath("/data/task-workspaces/a/b", android).replaceAll("\\", "/"))
+        .toBe("/data/user/0/com.openmausbot.test/files/data/task-workspaces/a/b");
+      expect(app).toContain("data");
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it("still maps what the guest actually names", () => {
+    const android = {
+      OMB_ANDROID_STANDALONE: "1",
+      OMB_ANDROID_LINUX_DIR: "/data/user/0/com.openmausbot.test/files/linux",
+      OMB_ANDROID_ROOTFS: "/data/user/0/com.openmausbot.test/files/linux/rootfs",
+      OMB_ANDROID_DATA_DIR: "/data/user/0/com.openmausbot.test/files/data",
+    } as NodeJS.ProcessEnv;
+    // The host separator follows the machine running this test; the guest's names never do.
+    expect(hostWorkspacePath("/host-linux/opencode", android).replaceAll("\\", "/"))
+      .toBe("/data/user/0/com.openmausbot.test/files/linux/opencode");
+    expect(hostWorkspacePath("/data", android).replaceAll("\\", "/"))
+      .toBe("/data/user/0/com.openmausbot.test/files/data");
+  });
+
+  it("leaves a desktop path alone", () => {
+    expect(hostWorkspacePath("/home/someone/project", { PATH: "/usr/bin" } as NodeJS.ProcessEnv)).toBe("/home/someone/project");
   });
 });
